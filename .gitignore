@@ -4,3 +4,6 @@ data/db.json
 data/*.bak
 .DS_Store
 *.log
+data/db.bak.json
+data/db.corrupt-*.json
+data/*.tmp
