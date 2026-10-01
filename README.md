@@ -42,3 +42,10 @@ npm run typecheck   # 型チェック（フロント + サーバ）
 npm test            # vitest
 ```
 設計・データモデル・API は [docs/SPEC.md](docs/SPEC.md) を参照。
+
+## トラブルシューティング
+**`[web] Error: EBUSY: resource busy or locked, watch` が出る（Windows）**
+Vite のファイル監視がロック中のファイルに当たったときのエラーです。`data/` と `dist/` は監視対象から除外済みですが、それでも出る場合は次を確認してください。
+- OneDrive / Dropbox などの同期フォルダやネットワークドライブではなく、`C:\Office-A` のようなローカルフォルダに置く
+- WSL と Windows をまたいだパス（`/mnt/c/...`、`\\wsl$\...`）で実行しない
+- 開発サーバーを使わず `npm run build && npm start` で起動する（監視を行わないため発生しません）
