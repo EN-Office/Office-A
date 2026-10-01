@@ -16,7 +16,47 @@ const TOTAL_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: {
 const THIN: Partial<ExcelJS.Border> = { style: "thin", color: { argb: "FFBFC4CE" } };
 const BORDER: Partial<ExcelJS.Borders> = { top: THIN, left: THIN, bottom: THIN, right: THIN };
 
-export const SHEET_NAMES = ["メンバー", "案件", "アサイン", "売上サマリ"] as const;
+export const SHEET_NAMES = ["メンバー", "案件", "アサイン", "売上サマリ", "説明"] as const;
+/** アサインシート末尾の集計行（取り込み時は読み飛ばす） */
+export const TOTAL_ROW_LABELS = ["月別売上合計", "月別稼働人月"] as const;
+const ID_FONT: Partial<ExcelJS.Font> = { color: { argb: "FF8A8F99" } };
+
+/** アサインセル 1 行分: `<案件コード> [<役割名>] ×<ratio>`（役割なしは省略、ratio=1 は省略） */
+export function formatAssignmentLine(project: Pick<Project, "code">, statusName: string | undefined, ratio: number): string {
+  let s = project.code;
+  if (statusName) s += ` [${statusName}]`;
+  if (Math.abs(ratio - 1) > 1e-9) s += ` ×${fmtRatio(ratio)}`;
+  return s;
+}
+
+const HELP_ROWS: Array<[string, string]> = [
+  ["Office-A Excel 取り込みルール", ""],
+  ["", ""],
+  ["全般", "このファイルを Excel で編集し、設定画面の「Excelから取り込み」で読み込むとデータに反映されます。取り込み前にプレビュー（追加・更新・削除の件数と警告）が表示されます。"],
+  ["", "各シートの 1 行目（見出し）は変更しないでください。列の並び替えは可能ですが、見出し名で列を判別します。"],
+  ["", "ID 列は既存データとの対応付けに使います。値は変更しないでください。新しく追加する行は ID を空欄にします。"],
+  ["", "行の追加・削除ができます。シートから消した行（メンバー / 案件）は取り込み時に削除され、その人・案件のアサインもすべて削除されます。"],
+  ["", "「売上サマリ」シートは参照用です。取り込み時には読み込みません。"],
+  ["", ""],
+  ["メンバー", "編集可能: 名前 / 役職 / 上長 / 備考。"],
+  ["", "役職は役職名で指定します。未登録の役職名は新しい役職（最下位）として追加されます。"],
+  ["", "上長は上長の名前で指定します（空欄はトップ）。見つからない名前は警告を出してトップ扱いになります。"],
+  ["", "ID が空欄の行は、同じ名前の既存メンバーがいればそのメンバー、いなければ新規メンバーとして扱います。"],
+  ["", "同じ上長を持つメンバーの並び順は、シートの行順になります。"],
+  ["", ""],
+  ["案件", "編集可能: 案件コード / 案件名 / 単価 / 開始 / 終了 / 必要役割 / 色 / 備考。"],
+  ["", "開始・終了は YYYY-MM 形式（例: 2026-04）。単価は 1 人月あたりの円（数値）。"],
+  ["", "必要役割は「PM×1, PL×1, 開発メンバー×3」の形式。未登録の役割名は新しい役割として追加されます。"],
+  ["", "色は #RRGGBB 形式（例: #e07a5f）。空欄の場合は自動で割り当てます。"],
+  ["", ""],
+  ["アサイン", "この年度の 12 ヶ月分のアサインを、シートの内容で置き換えます（ほかの年度のアサインは変更されません）。"],
+  ["", "1 セルに 1 件 1 行で書きます（セル内改行は Alt+Enter）。書式: 案件コード [役割名] ×按分"],
+  ["", "例: PRJ-2026-001 [PL] ×0.5 ／ PRJ-2026-002 [PM] ／ PRJ-2026-003（役割なし・按分 1）"],
+  ["", "按分は 0.05〜1。省略時は 1。1 を超える値は 1 に丸められます（警告あり）。"],
+  ["", "未登録の案件コードを書いた行は読み飛ばします（警告あり）。"],
+  ["", "メンバーは ID 列（空欄なら名前）で判別します。階層列・年間稼働列・末尾の集計行は参照用で、読み込みません。"],
+];
+
 
 function styleHeader(row: ExcelJS.Row): void {
   row.font = { bold: true };
@@ -61,48 +101,47 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
 
   /* ---------- メンバー ---------- */
   {
-    const ws = wb.addWorksheet(SHEET_NAMES[0], { views: [{ state: "frozen", xSplit: 1, ySplit: 1 }] });
+    const ws = wb.addWorksheet(SHEET_NAMES[0], { views: [{ state: "frozen", xSplit: 2, ySplit: 1 }] });
     ws.columns = [
+      { header: "ID", key: "id", width: 12 },
       { header: "名前", key: "name", width: 18 },
       { header: "役職", key: "role", width: 12 },
       { header: "上長", key: "boss", width: 18 },
-      { header: "階層パス", key: "path", width: 56 },
-      { header: "備考", key: "note", width: 30 },
+      { header: "備考", key: "note", width: 36 },
     ];
-    for (const { member } of tree) {
-      // 孤児の path は自分のみになるため、上長は parentId から引く
-      const pathNames: string[] = [];
-      const seen = new Set<string>();
-      for (let cur: typeof member | undefined = member; cur && !seen.has(cur.id); cur = cur.parentId ? memberById.get(cur.parentId) : undefined) {
-        seen.add(cur.id);
-        pathNames.unshift(cur.name);
-      }
-      ws.addRow({
+    for (const { member, depth } of tree) {
+      const row = ws.addRow({
+        id: member.id,
         name: member.name,
         role: roleById.get(member.roleId)?.name ?? "",
         boss: member.parentId ? (memberById.get(member.parentId)?.name ?? "") : "",
-        path: pathNames.join(" > "),
         note: member.note ?? "",
       });
+      // 階層は書式（インデント）で表す。セルの値は素の名前のまま
+      row.getCell("name").alignment = { indent: Math.min(depth, 15) };
     }
+    ws.getColumn("id").font = ID_FONT;
     styleHeader(ws.getRow(1));
     borderAll(ws);
   }
 
   /* ---------- 案件 ---------- */
   {
-    const ws = wb.addWorksheet(SHEET_NAMES[1], { views: [{ state: "frozen", xSplit: 1, ySplit: 1 }] });
+    const ws = wb.addWorksheet(SHEET_NAMES[1], { views: [{ state: "frozen", xSplit: 2, ySplit: 1 }] });
     ws.columns = [
-      { header: "コード", key: "code", width: 16 },
+      { header: "ID", key: "id", width: 12 },
+      { header: "案件コード", key: "code", width: 16 },
       { header: "案件名", key: "name", width: 28 },
-      { header: "単価(円/人月)", key: "unitPrice", width: 16, style: { numFmt: JPY } },
-      { header: "開始", key: "start", width: 10 },
-      { header: "終了", key: "end", width: 10 },
+      { header: "単価", key: "unitPrice", width: 16, style: { numFmt: JPY } },
+      { header: "開始", key: "start", width: 10, style: { numFmt: "@" } },
+      { header: "終了", key: "end", width: 10, style: { numFmt: "@" } },
       { header: "必要役割", key: "required", width: 36 },
+      { header: "色", key: "color", width: 10 },
       { header: "備考", key: "note", width: 30 },
     ];
     for (const p of [...db.projects].sort((a, b) => a.code.localeCompare(b.code))) {
       ws.addRow({
+        id: p.id,
         code: p.code,
         name: p.name,
         unitPrice: p.unitPrice,
@@ -111,19 +150,23 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
         required: (p.required ?? [])
           .map((r) => `${statusById.get(r.statusId)?.name ?? r.statusId}×${r.count}`)
           .join(", "),
+        color: p.color,
         note: p.note ?? "",
       });
     }
+    ws.getColumn("id").font = ID_FONT;
     styleHeader(ws.getRow(1));
     borderAll(ws);
   }
 
   /* ---------- アサイン ---------- */
   {
-    const ws = wb.addWorksheet(SHEET_NAMES[2], { views: [{ state: "frozen", xSplit: 1, ySplit: 1 }] });
+    const ws = wb.addWorksheet(SHEET_NAMES[2], { views: [{ state: "frozen", xSplit: 3, ySplit: 1 }] });
     ws.columns = [
+      { header: "ID", key: "id", width: 12 },
       { header: "メンバー", key: "member", width: 22 },
-      ...months.map((m) => ({ header: m, key: m, width: 30 })),
+      { header: "階層", key: "depth", width: 6 },
+      ...months.map((m) => ({ header: m, key: m, width: 26 })),
       { header: "年間稼働(人月)", key: "total", width: 14 },
     ];
     const byMemberMonth = new Map<string, Assignment[]>();
@@ -136,7 +179,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
     for (const { member, depth } of tree) {
       let lines = 1;
       let total = 0;
-      const values: Record<string, string | number> = { member: "　".repeat(depth) + member.name };
+      const values: Record<string, string | number> = { id: member.id, member: member.name, depth };
       for (const m of months) {
         const list = (byMemberMonth.get(`${member.id}|${m}`) ?? []).sort((a, b) =>
           (projectById.get(a.projectId)?.code ?? "").localeCompare(projectById.get(b.projectId)?.code ?? ""),
@@ -144,20 +187,19 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
         lines = Math.max(lines, list.length);
         total += list.reduce((s, a) => s + ratioOf(a), 0);
         values[m] = list
-          .map((a) => {
-            const p = projectById.get(a.projectId) as Project;
-            return `${p.code} ${p.name} ×${fmtRatio(ratioOf(a))}`;
-          })
+          .map((a) => formatAssignmentLine(projectById.get(a.projectId) as Project, a.statusId ? statusById.get(a.statusId)?.name : undefined, ratioOf(a)))
           .join("\n");
       }
       values.total = Math.round(total * 100) / 100;
       const row = ws.addRow(values);
       row.alignment = { vertical: "top", wrapText: true };
+      row.getCell("member").alignment = { vertical: "top", indent: Math.min(depth, 15) };
+      row.getCell("depth").alignment = { vertical: "top", horizontal: "center" };
       row.height = Math.max(18, lines * 15 + 4);
     }
 
-    const revenueRow: Record<string, string | number> = { member: "月別売上合計" };
-    const mmRow: Record<string, string | number> = { member: "月別稼働人月" };
+    const revenueRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[0] };
+    const mmRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[1] };
     let revTotal = 0;
     let mmTotal = 0;
     for (const m of months) {
@@ -182,6 +224,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
     }
     ws.getColumn("total").numFmt = "0.0#";
     r1.getCell("total").numFmt = JPY;
+    ws.getColumn("id").font = ID_FONT;
     styleHeader(ws.getRow(1));
     borderAll(ws);
   }
@@ -234,6 +277,21 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
     ws.getColumn("total").font = { bold: true };
     styleHeader(ws.getRow(1));
     borderAll(ws);
+  }
+
+  /* ---------- 説明 ---------- */
+  {
+    const ws = wb.addWorksheet(SHEET_NAMES[4]);
+    ws.columns = [
+      { key: "topic", width: 14 },
+      { key: "text", width: 110 },
+    ];
+    for (const [topic, text] of HELP_ROWS) {
+      const row = ws.addRow({ topic, text });
+      row.alignment = { vertical: "top", wrapText: true };
+      if (topic) row.getCell("topic").font = { bold: true };
+    }
+    ws.getRow(1).font = { bold: true, size: 14 };
   }
 
   const out = await wb.xlsx.writeBuffer();

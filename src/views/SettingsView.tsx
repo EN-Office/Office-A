@@ -5,9 +5,9 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "framer-motion";
-import type { ID } from "@shared/types";
+import type { ID, ImportReport } from "@shared/types";
 import { useStore } from "@/lib/store";
-import { exportUrl } from "@/lib/api";
+import { exportUrl, importXlsx } from "@/lib/api";
 import { Button, ColorSwatch, ConfirmPopover, Icon, IconButton, InlineEdit, PALETTE, Select, TextInput } from "@/components/ui";
 import "./SettingsView.css";
 
@@ -78,8 +78,14 @@ export default function SettingsView() {
         <StatusesEditor />
       </Section>
 
-      <Section no="04" title="Excel出力" en="Export" desc="メンバー・案件・年度アサイン・売上サマリの 4 シートを生成します。">
+      <Section
+        no="04"
+        title="Excel"
+        en="Export / Import"
+        desc="メンバー・案件・年度アサイン・売上サマリ・説明の 5 シートを生成します。Excel で編集したファイルはそのまま取り込めます。"
+      >
         <ExportPanel />
+        <ExcelImportPanel />
       </Section>
 
       <Section no="05" title="データ" en="Data" desc={<>すべてのデータはローカルの <code className="num st-code">data/db.json</code> に保存されます。</>}>
@@ -274,13 +280,151 @@ function ExportPanel() {
         <span className="num muted small">{year}.{String(start).padStart(2, "0")} — {endYear}.{String(endMonth).padStart(2, "0")}</span>
       </div>
       <ol className="st-export__sheets">
-        {["メンバー", "案件", "アサイン", "売上サマリ"].map((s, i) => (
+        {["メンバー", "案件", "アサイン", "売上サマリ", "説明"].map((s, i) => (
           <li key={s}><span className="num muted">{String(i + 1).padStart(2, "0")}</span>{s}</li>
         ))}
       </ol>
       <Button variant="primary" icon="download" onClick={() => window.open(exportUrl(year), "_blank", "noopener")}>
         .xlsx をダウンロード
       </Button>
+    </div>
+  );
+}
+
+/* ================= excel import ================= */
+
+function ExcelImportPanel() {
+  const load = useStore((s) => s.load);
+  const saveState = useStore((s) => s.saveState);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<{ file: File; report: ImportReport } | null>(null);
+  const [busy, setBusy] = useState<"check" | "apply" | null>(null);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const saving = saveState === "dirty" || saveState === "saving";
+
+  const pick = async (file: File | undefined) => {
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    setMsg(null);
+    setPending(null);
+    setBusy("check");
+    try {
+      const { report } = await importXlsx(file, true);
+      setPending({ file, report });
+    } catch (e) {
+      setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const apply = async () => {
+    if (!pending) return;
+    setBusy("apply");
+    try {
+      const { report } = await importXlsx(pending.file, false);
+      await load();
+      const n = report.warnings.length;
+      setMsg({ kind: "ok", text: `${pending.file.name} を取り込みました${n ? `（警告 ${n} 件）` : ""}` });
+      setPending(null);
+    } catch (e) {
+      setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const r = pending?.report;
+  const months = r?.assignments.months ?? [];
+  const range = months.length ? `${months[0]} — ${months[months.length - 1]}` : "対象月なし";
+
+  return (
+    <div className="st-ximport">
+      <div className="st-ximport__head">
+        <div>
+          <div className="eyebrow">Excelから取り込み</div>
+          <p className="muted small st-ximport__rule">
+            編集ルールは Excel の<span className="st-ximport__link">『説明』シート</span>参照。ID 列はそのまま、行の追加・削除は可能です。
+          </p>
+        </div>
+        <Button icon="upload" disabled={busy !== null} onClick={() => fileRef.current?.click()}>
+          {busy === "check" ? "確認中…" : "Excelから取り込み…"}
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          hidden
+          onChange={(e) => pick(e.target.files?.[0])}
+        />
+      </div>
+
+      <AnimatePresence>
+        {pending && r && (
+          <motion.div
+            className="st-ximport__preview"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2, ease }}
+          >
+            <div className="st-ximport__file">
+              <span className="num">{pending.file.name}</span>
+              <span className="muted small">プレビュー（まだ保存されていません）</span>
+            </div>
+            <table className="st-ximport__table">
+              <thead>
+                <tr>
+                  <th />
+                  <th className="eyebrow">追加</th>
+                  <th className="eyebrow">更新</th>
+                  <th className="eyebrow">削除</th>
+                </tr>
+              </thead>
+              <tbody>
+                {([["メンバー", r.members], ["案件", r.projects]] as const).map(([label, e]) => (
+                  <tr key={label}>
+                    <th scope="row">{label}</th>
+                    <td className="num" title={e.addedNames.join("\n")}>{e.added}</td>
+                    <td className="num">{e.updated}</td>
+                    <td className={`num${e.removed ? " is-danger" : ""}`} title={e.removedNames.join("\n")}>{e.removed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {(r.members.removedNames.length > 0 || r.projects.removedNames.length > 0) && (
+              <p className="small st-ximport__removed">
+                削除: {[...r.members.removedNames, ...r.projects.removedNames].join("、")}（関連するアサインも削除されます）
+              </p>
+            )}
+            <p className="small">
+              アサイン <span className="num">{r.assignments.previous}</span> 件 → <span className="num">{r.assignments.count}</span> 件
+              <span className="muted">（{range} の {months.length} ヶ月を置き換え）</span>
+            </p>
+            {(r.rolesAdded.length > 0 || r.statusesAdded.length > 0) && (
+              <p className="small muted">
+                新規作成: {[...r.rolesAdded.map((n) => `役職「${n}」`), ...r.statusesAdded.map((n) => `役割「${n}」`)].join("、")}
+              </p>
+            )}
+            {r.warnings.length > 0 && (
+              <div className="st-ximport__warn">
+                <div className="small">警告 {r.warnings.length} 件</div>
+                <ul>
+                  {r.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+            <div className="st-ximport__actions">
+              {saving && <span className="muted small grow">編集内容を保存中です…</span>}
+              <Button variant="ghost" size="sm" disabled={busy === "apply"} onClick={() => setPending(null)}>キャンセル</Button>
+              <Button variant="primary" size="sm" icon="check" disabled={busy !== null || saving} onClick={apply}>
+                {busy === "apply" ? "取り込み中…" : "取り込む"}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {msg && <p className={`st-msg st-msg--${msg.kind}`}>{msg.text}</p>}
     </div>
   );
 }

@@ -169,3 +169,31 @@ export function emptyDB(): DB {
     settings: { companyName: "Office-A", fiscalYearStartMonth: 4, currency: "JPY" },
   };
 }
+
+/* ---------- Excel 取り込みレポート ---------- */
+
+export interface ImportEntityReport {
+  added: number;
+  updated: number;
+  removed: number;
+  addedNames: string[];
+  removedNames: string[];
+}
+
+export interface ImportReport {
+  members: ImportEntityReport;
+  projects: ImportEntityReport;
+  assignments: {
+    /** 取り込み後、対象月に存在するアサイン件数 */
+    count: number;
+    /** 取り込み前、対象月に存在したアサイン件数 */
+    previous: number;
+    /** 置き換え対象の月（アサインシートの見出し） */
+    months: MonthKey[];
+  };
+  /** 新規作成された役職名 */
+  rolesAdded: string[];
+  /** 新規作成された案件内役割名 */
+  statusesAdded: string[];
+  warnings: string[];
+}

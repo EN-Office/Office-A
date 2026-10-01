@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type ErrorRequestHandler, type NextFunction, type Request, type Response } from "express";
 import { Store, normalizeDB } from "./storage";
 import { exportWorkbook } from "./excel";
+import { ImportError, importWorkbook } from "./excelImport";
 import { currentFiscalYear } from "./seed";
 
 const HOST = "127.0.0.1";
@@ -86,6 +87,37 @@ export function createApp(store: Store): express.Express {
     res.setHeader("Content-Length", String(buf.length));
     res.end(buf);
   });
+
+  /** 編集した Excel の取り込み。?dryRun=1 はレポートのみ返して保存しない */
+  app.post(
+    "/api/import.xlsx",
+    express.raw({
+      type: ["application/octet-stream", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      limit: "20mb",
+    }),
+    async (req, res) => {
+      const body: unknown = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        throw new HttpError(400, "xlsx の本体が空です（Content-Type: application/octet-stream で送信してください）");
+      }
+      const dryRun = req.query.dryRun === "1" || req.query.dryRun === "true";
+      const before = store.get();
+      let result: Awaited<ReturnType<typeof importWorkbook>>;
+      try {
+        result = await importWorkbook(body, before);
+      } catch (e) {
+        if (e instanceof ImportError) throw new HttpError(400, e.message);
+        throw e;
+      }
+      if (dryRun) {
+        res.json({ dryRun: true, report: result.report });
+        return;
+      }
+      if (store.get() !== before) throw new HttpError(409, "conflict", { version: store.get().version });
+      const saved = store.replace({ ...result.db, version: before.version + 1 });
+      res.json({ version: saved.version, report: result.report });
+    },
+  );
 
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not found")));
 
