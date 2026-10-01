@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import type { Assignment, DB, ID, Member, MonthKey, Project, Role, RoleStatus, Settings } from "@shared/types";
 import { emptyDB, uid } from "@shared/types";
+import { fiscalMonths } from "@shared/types";
 import { fetchDB, saveDB } from "./api";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -234,4 +235,44 @@ export function monthlyRevenue(db: DB, month: MonthKey): number {
 
 export function formatJPY(n: number): string {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
+}
+
+/* ---------- 追加セレクタ（組織・案件ビュー用） ---------- */
+
+/** 表示年度の 12 ヶ月 */
+export function selectFiscalMonths(db: DB, fiscalYear: number): MonthKey[] {
+  return fiscalMonths(fiscalYear, db.settings.fiscalYearStartMonth);
+}
+
+/** メンバーごとの年度内アサイン件数と平均稼働（ratio 合計 / 12） */
+export function selectMemberYearStats(db: DB, months: MonthKey[]): Map<ID, { count: number; load: number }> {
+  const set = new Set(months);
+  const out = new Map<ID, { count: number; load: number }>();
+  for (const a of db.assignments) {
+    if (!set.has(a.month)) continue;
+    const s = out.get(a.memberId) ?? { count: 0, load: 0 };
+    s.count += 1;
+    s.load += a.ratio;
+    out.set(a.memberId, s);
+  }
+  for (const s of out.values()) s.load = s.load / 12;
+  return out;
+}
+
+/** 案件ごと・役割ステータスごとの年度内アサイン済み人数（重複なし） */
+export function selectProjectFulfilment(db: DB, months: MonthKey[]): Map<ID, Map<ID | "", number>> {
+  const set = new Set(months);
+  const acc = new Map<ID, Map<ID | "", Set<ID>>>();
+  for (const a of db.assignments) {
+    if (!set.has(a.month)) continue;
+    const byStatus = acc.get(a.projectId) ?? new Map<ID | "", Set<ID>>();
+    const key = a.statusId ?? "";
+    const members = byStatus.get(key) ?? new Set<ID>();
+    members.add(a.memberId);
+    byStatus.set(key, members);
+    acc.set(a.projectId, byStatus);
+  }
+  const out = new Map<ID, Map<ID | "", number>>();
+  for (const [pid, byStatus] of acc) out.set(pid, new Map([...byStatus].map(([k, v]) => [k, v.size])));
+  return out;
 }
