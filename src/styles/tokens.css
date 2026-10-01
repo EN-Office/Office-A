@@ -1,9 +1,11 @@
 /* ===== Office-A Design Tokens =====
    トーン: 編集室のレイアウトテーブル。紙 × インク × 1アクセント。 */
 :root {
-  --font-display: "Instrument Serif", "Noto Serif JP", serif;
-  --font-body: "Inter", "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* フォントはメイリオに統一（Windows 標準）。未搭載環境は Meiryo UI → 游ゴシック → システムの順でフォールバック */
+  --font-meiryo: "Meiryo", "メイリオ", "Meiryo UI", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
+  --font-display: var(--font-meiryo);
+  --font-body: var(--font-meiryo);
+  --font-mono: var(--font-meiryo);
 
   --paper: #f6f4ef;
   --paper-2: #efece4;

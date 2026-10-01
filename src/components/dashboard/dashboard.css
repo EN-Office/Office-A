@@ -4,7 +4,7 @@
 .dash-muted { color: var(--ink-3); font-size: 11px; margin-left: 8px; }
 .dash-kicker { font-size: 11px; letter-spacing: .14em; color: var(--ink-3); margin-bottom: var(--space-2); }
 .dash-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(52px, 8vw, 112px); line-height: .92; letter-spacing: -.025em; }
-.dash-title i, .dash-h2 i { font-style: italic; color: var(--accent); }
+.dash-title i, .dash-h2 i { font-style: normal; font-weight: 700; color: var(--accent); }
 .dash-h2 { margin: 0 0 var(--space-4); font-family: var(--font-display); font-weight: 400; font-size: 34px; line-height: 1; letter-spacing: -.01em; padding-top: var(--space-3); border-top: 1px solid var(--ink); }
 .dash-empty { color: var(--ink-3); font-size: 13px; padding: var(--space-5) 0; }
 
