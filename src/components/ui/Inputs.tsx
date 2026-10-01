@@ -37,10 +37,12 @@ const fmt = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
 export function NumberInput({ value, onChange, currency, min, suffix, className = "", ...rest }: NumberInputProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
+  const cancelled = useRef(false);
   useEffect(() => { if (!editing) setDraft(String(value)); }, [value, editing]);
 
   const commit = () => {
     setEditing(false);
+    if (cancelled.current) { cancelled.current = false; return; }
     const n = Number(draft.replace(/[^\d.-]/g, ""));
     if (!Number.isFinite(n)) return setDraft(String(value));
     const v = min != null ? Math.max(min, n) : n;
@@ -54,10 +56,10 @@ export function NumberInput({ value, onChange, currency, min, suffix, className 
         className="ui-input num"
         inputMode="numeric"
         value={editing ? draft : fmt.format(value)}
-        onFocus={(e) => { setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
+        onFocus={(e) => { cancelled.current = false; setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setDraft(String(value)); setEditing(false); (e.target as HTMLInputElement).blur(); } }}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { e.stopPropagation(); cancelled.current = true; setDraft(String(value)); (e.target as HTMLInputElement).blur(); } }}
         {...rest}
       />
       {suffix && <span className="ui-field__suffix">{suffix}</span>}

@@ -17,6 +17,7 @@ body {
   font-feature-settings: "ss01", "cv11";
   transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
+i, em, cite, address, dfn, var { font-style: normal; }
 img, svg, video, canvas { display: block; max-width: 100%; }
 input, button, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }

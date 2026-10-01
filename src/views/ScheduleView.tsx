@@ -222,7 +222,7 @@ export default function ScheduleView() {
   }, [db, rows, months, cells]);
 
   /* パレット */
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1200); // 狭い画面ではパレットを畳んでマトリクスを優先
   const [filter, setFilter] = useState("");
   const palette = useMemo(() => {
     const t = filter.trim().toLowerCase();
@@ -373,6 +373,11 @@ export default function ScheduleView() {
               <div className="sch-empty">メンバーがいません。まず「組織」でメンバーを追加してください。</div>
             ) : (
               <table className="sch-table">
+                <colgroup>
+                  <col className="sch-col-name" />
+                  {months.map((m) => <col key={m} />)}
+                  <col className="sch-col-end" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th className="sch-th sch-th-name">メンバー</th>

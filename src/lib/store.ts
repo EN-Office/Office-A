@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import type { Assignment, DB, ID, Member, MonthKey, Project, Role, RoleStatus, Settings } from "@shared/types";
 import { emptyDB, uid } from "@shared/types";
-import { fiscalMonths } from "@shared/types";
+import { fiscalMonths, fiscalYearOf } from "@shared/types";
 import { fetchDB, saveDB } from "./api";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -54,24 +54,42 @@ export interface AppState {
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
+let inflight = false;
 function scheduleSave(get: () => AppState, set: (p: Partial<AppState>) => void) {
   set({ saveState: "dirty" });
   clearTimeout(timer);
-  timer = setTimeout(async () => {
-    set({ saveState: "saving" });
-    try {
-      const { version } = await saveDB(get().db);
-      set({ db: { ...get().db, version }, saveState: "saved" });
-    } catch (e) {
-      if ((e as Error).message === "conflict") {
-        // 他タブ等で更新されていた場合はサーバ側を正として再読込
+  timer = setTimeout(() => void flush(get, set), 400);
+}
+
+/** 保存は直列化する（PUT 中に次の debounce が発火しても、古い version で 409 にならないように） */
+async function flush(get: () => AppState, set: (p: Partial<AppState>) => void) {
+  if (inflight) {
+    timer = setTimeout(() => void flush(get, set), 100);
+    return;
+  }
+  inflight = true;
+  set({ saveState: "saving" });
+  const sent = get().db;
+  try {
+    const { version } = await saveDB(sent);
+    const changed = get().db !== sent;
+    set({ db: { ...get().db, version }, saveState: changed ? "dirty" : "saved" });
+  } catch (e) {
+    if ((e as Error).message === "conflict") {
+      // 他タブ等で更新されていた場合はサーバ側を正として再読込
+      clearTimeout(timer);
+      try {
         const fresh = await fetchDB();
         set({ db: fresh, saveState: "error" });
-      } else {
+      } catch {
         set({ saveState: "error" });
       }
+    } else {
+      set({ saveState: "error" });
     }
-  }, 400);
+  } finally {
+    inflight = false;
+  }
 }
 
 function sortSiblings(members: Member[], parentId: ID | null) {
@@ -101,7 +119,12 @@ export const useStore = create<AppState>((set, get) => {
 
     load: async () => {
       const db = await fetchDB();
-      set({ db, loaded: true, saveState: "idle" });
+      clearTimeout(timer); // 読み込み前の未送信変更は破棄（古い version での PUT を防ぐ）
+      // 初回読込時は、保存済みの年度開始月を基準に「現在の年度」を選ぶ
+      const now = new Date();
+      const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const first = get().loaded ? {} : { fiscalYear: fiscalYearOf(nowKey, db.settings.fiscalYearStartMonth || 4) };
+      set({ ...first, db, loaded: true, saveState: "idle" });
     },
     mutate,
 
@@ -139,11 +162,15 @@ export const useStore = create<AppState>((set, get) => {
     removeMember: (id) => mutate((db) => {
       const m = db.members.find((x) => x.id === id);
       if (!m) return;
-      // 子は削除対象の親へ付け替え
-      for (const c of db.members) if (c.parentId === id) c.parentId = m.parentId;
+      // 子は削除対象の親へ付け替え（削除対象のあった位置に、元の並び順のまま挿入）
+      const kids = db.members.filter((c) => c.parentId === id).sort((a, b) => a.order - b.order);
+      const siblings = db.members.filter((x) => x.parentId === m.parentId).sort((a, b) => a.order - b.order);
+      const at = siblings.findIndex((x) => x.id === id);
+      siblings.splice(at, 1, ...kids);
+      for (const c of kids) c.parentId = m.parentId;
+      siblings.forEach((s, i) => (s.order = i));
       db.members = db.members.filter((x) => x.id !== id);
       db.assignments = db.assignments.filter((a) => a.memberId !== id);
-      sortSiblings(db.members, m.parentId);
     }),
 
     addRole: (input) => {
@@ -234,7 +261,8 @@ export function monthlyRevenue(db: DB, month: MonthKey): number {
 }
 
 export function formatJPY(n: number): string {
-  return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
+  // Intl の通貨表記は全角「￥」になるため、他画面と揃えて半角「¥」で出す
+  return "¥" + Math.round(n).toLocaleString("ja-JP");
 }
 
 /* ---------- 追加セレクタ（組織・案件ビュー用） ---------- */

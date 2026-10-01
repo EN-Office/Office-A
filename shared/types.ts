@@ -144,7 +144,7 @@ export function uid(prefix = ""): ID {
 }
 
 export const DEFAULT_ROLES: Role[] = [
-  { id: "role_bucho", name: "部長", level: 0, color: "#1d1d1f" },
+  { id: "role_bucho", name: "部長", level: 0, color: "#b0423a" },
   { id: "role_kacho", name: "課長", level: 1, color: "#3b4a6b" },
   { id: "role_kacho_dairi", name: "課長代理", level: 2, color: "#5b6b8c" },
   { id: "role_shunin", name: "主任", level: 3, color: "#7f8aa3" },

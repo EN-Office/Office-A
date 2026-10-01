@@ -1,12 +1,12 @@
 /* ===== Schedule (sch-) ===== */
-.sch-root { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+.sch-root { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; height: 100vh; min-height: 520px; padding: var(--space-5) var(--space-6) var(--space-5); }
 .sch-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 .sch-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); flex-wrap: wrap; }
 .sch-kicker { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .sch-year-btn { border: 1px solid var(--line); background: transparent; color: var(--ink-2); width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 11px; line-height: 1; transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast); }
 .sch-year-btn:hover { border-color: var(--ink); transform: scale(1.08); }
-.sch-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 6vw, 84px); line-height: .95; letter-spacing: -.02em; color: var(--ink); }
+.sch-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(40px, min(6vw, 9vh), 84px); line-height: .95; letter-spacing: -.02em; color: var(--ink); }
 .sch-title em, .sch-panel-head em { font-style: normal; font-weight: 700; color: var(--accent); margin-left: .25em; font-size: .55em; letter-spacing: 0; }
 .sch-summary { display: flex; gap: var(--space-6); margin: 0; }
 .sch-summary > div { border-left: 1px solid var(--line-strong); padding-left: var(--space-3); min-width: 110px; }
@@ -14,12 +14,14 @@
 .sch-summary dd { margin: 4px 0 0; font-size: 22px; color: var(--ink); }
 .sch-summary small { font-size: 12px; color: var(--ink-3); margin-left: 2px; }
 
-.sch-body { display: flex; gap: var(--space-4); align-items: flex-start; min-width: 0; }
-.sch-scroll { flex: 1; min-width: 0; max-height: calc(100vh - 240px); min-height: 320px; overflow: auto; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line-strong); background: var(--paper); position: relative; }
+.sch-body { display: flex; gap: var(--space-4); align-items: stretch; flex: 1; min-width: 0; min-height: 0; }
+.sch-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line-strong); background: var(--paper); position: relative; }
 .sch-empty { padding: var(--space-8); text-align: center; color: var(--ink-3); font-size: 14px; }
 .sch-empty-s { padding: var(--space-4); color: var(--ink-3); font-size: 12px; text-align: center; }
 
-.sch-table { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; }
+.sch-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: calc(200px + 12 * var(--cell-w) + 92px); table-layout: fixed; }
+.sch-table .sch-col-name { width: 200px; }
+.sch-table .sch-col-end { width: 92px; }
 .sch-table col { width: var(--cell-w); }
 .sch-th { position: sticky; top: 0; z-index: 3; background: var(--paper); height: 40px; text-align: left; padding: 0 var(--space-3); border-bottom: 1px solid var(--line-strong); font-weight: 400; color: var(--ink-2); min-width: var(--cell-w); white-space: nowrap; }
 .sch-th-m { font-size: 14px; color: var(--ink); }
@@ -85,7 +87,7 @@ body.sch-filling, body.sch-filling * { cursor: ew-resize !important; user-select
 .sch-copy-badge { position: absolute; top: -10px; right: -6px; background: var(--accent); color: var(--accent-ink); font-size: 10px; padding: 2px 6px; border-radius: 99px; }
 
 /* panel */
-.sch-panel { flex: none; position: sticky; top: 0; border-top: 1px solid var(--ink); background: var(--paper); overflow: hidden; max-height: calc(100vh - 240px); display: flex; flex-direction: column; border-bottom: 1px solid var(--line-strong); }
+.sch-panel { flex: none; position: sticky; top: 0; border-top: 1px solid var(--ink); background: var(--paper); overflow: hidden; display: flex; flex-direction: column; border-bottom: 1px solid var(--line-strong); }
 .sch-panel-toggle { display: flex; align-items: center; gap: var(--space-2); background: transparent; border: 0; border-bottom: 1px solid var(--line); height: 40px; padding: 0 var(--space-3); cursor: pointer; color: var(--ink-2); justify-content: flex-end; flex: none; }
 .sch-panel-toggle:hover { color: var(--accent); }
 .sch-panel-vert { writing-mode: vertical-rl; font-size: 12px; letter-spacing: .2em; margin-top: var(--space-5); }

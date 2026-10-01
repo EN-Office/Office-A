@@ -274,7 +274,7 @@ function ExportPanel() {
         <span className="num muted small">{year}.{String(start).padStart(2, "0")} — {endYear}.{String(endMonth).padStart(2, "0")}</span>
       </div>
       <ol className="st-export__sheets">
-        {["メンバー", "案件", `アサイン(${year})`, "売上サマリ"].map((s, i) => (
+        {["メンバー", "案件", "アサイン", "売上サマリ"].map((s, i) => (
           <li key={s}><span className="num muted">{String(i + 1).padStart(2, "0")}</span>{s}</li>
         ))}
       </ol>
