@@ -1,0 +1,53 @@
+/* ===== Office-A Design Tokens =====
+   トーン: 編集室のレイアウトテーブル。紙 × インク × 1アクセント。 */
+:root {
+  --font-display: "Instrument Serif", "Noto Serif JP", serif;
+  --font-body: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --paper: #f6f4ef;
+  --paper-2: #efece4;
+  --paper-3: #e6e2d8;
+  --ink: #141311;
+  --ink-2: #4a4843;
+  --ink-3: #8a877f;
+  --line: rgba(20, 19, 17, 0.12);
+  --line-strong: rgba(20, 19, 17, 0.28);
+  --accent: #e4572e;        /* 朱 */
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(228, 87, 46, 0.12);
+  --ok: #2e8b57;
+  --warn: #d9a300;
+  --danger: #c0392b;
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 14px;
+  --shadow-1: 0 1px 2px rgba(20,19,17,.06), 0 8px 24px -12px rgba(20,19,17,.18);
+  --shadow-2: 0 2px 6px rgba(20,19,17,.08), 0 24px 48px -16px rgba(20,19,17,.28);
+
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px; --space-9: 96px;
+
+  --ease-out: cubic-bezier(.2,.8,.2,1);
+  --dur-fast: 150ms; --dur: 220ms; --dur-slow: 320ms;
+
+  --sidebar-w: 232px;
+  --cell-w: 148px;
+  --row-h: 56px;
+}
+
+:root[data-theme="dark"] {
+  --paper: #121211;
+  --paper-2: #1a1917;
+  --paper-3: #24221f;
+  --ink: #f2efe8;
+  --ink-2: #c6c2b8;
+  --ink-3: #807c73;
+  --line: rgba(242, 239, 232, 0.12);
+  --line-strong: rgba(242, 239, 232, 0.28);
+  --accent: #ff6b45;
+  --accent-soft: rgba(255, 107, 69, 0.16);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.5), 0 24px 48px -16px rgba(0,0,0,.7);
+}
