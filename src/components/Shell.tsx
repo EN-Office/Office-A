@@ -92,8 +92,8 @@ export default function Shell({ children }: { children: ReactNode }) {
     <div className="shell">
       <aside className="shell-side">
         <div className="shell-brand">
-          <div className="shell-brand__mark">Office<span>‑</span><em>A</em></div>
-          <div className="shell-brand__sub">{company && company !== "Office-A" ? company : "Resource Planner"}</div>
+          <div className="shell-brand__mark">PJ管理</div>
+          <div className="shell-brand__sub">{company && company !== "Office-A" ? company : "開発本部BS部"}</div>
         </div>
 
         <nav className="shell-nav" aria-label="メインナビゲーション">

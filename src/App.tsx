@@ -35,7 +35,7 @@ function Loading({ error, onRetry }: { error: string | null; onRetry: () => void
         transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
       >
         <div className="eyebrow">Resource Planner</div>
-        <h1 className="app-loading__mark">Office<span>‑</span><em>A</em></h1>
+        <h1 className="app-loading__mark">PJ管理</h1>
         {error ? (
           <>
             <p className="app-loading__msg">データを読み込めませんでした。<br /><span className="num muted small">{error}</span></p>
