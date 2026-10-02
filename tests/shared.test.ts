@@ -77,3 +77,19 @@ describe("flattenTree", () => {
     expect(flat.map((f) => f.member.id).sort()).toEqual(["x", "y"]);
   });
 });
+
+describe("normalizeDB migrations", () => {
+  it("moves legacy unitPrice to amount and fills hoursPerMonth", async () => {
+    const { normalizeDB } = await import("../server/storage");
+    const db = normalizeDB({
+      projects: [{ id: "p1", code: "A", name: "a", unitPrice: 1_200_000, startMonth: "2026-04", endMonth: "2026-09", required: [], color: "#000000" }],
+      settings: { companyName: "X", fiscalYearStartMonth: 4, currency: "JPY" },
+    })!;
+    expect(db.projects[0].amount).toBe(1_200_000);
+    expect("unitPrice" in db.projects[0]).toBe(false);
+    expect(db.settings.hoursPerMonth).toBe(160);
+    const kept = normalizeDB({ projects: [{ id: "p2", amount: 5, unitPrice: 9 }], settings: { hoursPerMonth: 150 } })!;
+    expect(kept.projects[0].amount).toBe(5);
+    expect(kept.settings.hoursPerMonth).toBe(150);
+  });
+});

@@ -4,6 +4,9 @@
  */
 import ExcelJS from "exceljs";
 import {
+  hoursPerMonthOf,
+  hoursRange,
+  ratioToHours,
   uid,
   type Assignment,
   type DB,
@@ -29,9 +32,16 @@ const PALETTE = [
   "#2f6fab", "#3b4a6b", "#7b5ea7", "#c2477f", "#8a6a4f", "#1d1d1f",
 ];
 
-/** アサインセル 1 行の書式: `<案件コード> [<役割名>] ×<ratio>` */
-export const ASSIGNMENT_LINE_RE = /^([^\s[\]×]+)(?:\s*\[(.*?)\])?(?:\s*[×xX*]\s*([0-9.]+))?$/;
-const RATIO_MIN = 0.05;
+/**
+ * アサインセル 1 行の書式（NFKC 正規化後に照合。全角の「８０ｈ」も可）:
+ *   `<案件コード> [<役割名>] <時間>h`   … 時間 ÷ 1人月時間 = ratio
+ *   `<案件コード> [<役割名>] ×<ratio>`  … 旧形式（x / X / * も可）
+ *   `<案件コード> [<役割名>]`           … 1人月
+ * グループ: 1=コード, 2=役割名, 3=旧形式の按分, 4=時間
+ */
+export const ASSIGNMENT_LINE_RE = /^([^\s[\]×]+)(?:\s*\[(.*?)\])?(?:\s*(?:[×xX*]\s*([0-9.]+)|([0-9.]+)\s*[hH]))?$/;
+/** 旧版で出力した集計行（取り込み時は読み飛ばす） */
+const LEGACY_TOTAL_ROW_LABELS = ["月別売上合計"];
 
 /* ---------- セル値ヘルパ ---------- */
 
@@ -96,7 +106,7 @@ interface Sheet {
   rows: SheetRow[];
 }
 
-/** 見出しの正規化: 括弧書き（"単価(円/人月)" → "単価"）を落とす */
+/** 見出しの正規化: 括弧書き（"受注金額(円)" → "受注金額"）を落とす */
 const headerKey = (s: string): string => key(s).replace(/\s*\(.*\)\s*$/, "");
 
 function readSheet(ws: ExcelJS.Worksheet, aliases: Record<string, string[]>): Sheet {
@@ -338,7 +348,8 @@ export async function importWorkbook(
     warnings.push(`「${SHEET_PROJECTS}」シートがないため、案件は変更しません`);
   } else {
     const sh = readSheet(wsProjects, {
-      id: ["ID"], code: ["案件コード", "コード"], name: ["案件名"], unitPrice: ["単価"], start: ["開始"], end: ["終了"],
+      // 旧版の「単価」列も受注金額として読む（値はそのまま）
+      id: ["ID"], code: ["案件コード", "コード"], name: ["案件名"], amount: ["受注金額", "単価"], start: ["開始"], end: ["終了"],
       required: ["必要役割"], color: ["色"], note: ["備考"],
     });
     if (!sh.cols.has("code")) {
@@ -349,7 +360,7 @@ export async function importWorkbook(
       for (const r of sh.rows) {
         const id = r.text("id");
         const code = r.text("code");
-        const blank = ["name", "unitPrice", "start", "end", "required", "color", "note"].every((c) => !r.text(c));
+        const blank = ["name", "amount", "start", "end", "required", "color", "note"].every((c) => !r.text(c));
         if (!id && !code && blank) continue;
         if (!code) {
           warnings.push(at(sh.name, r.rowNo) + "案件コードが空のため読み飛ばしました");
@@ -395,11 +406,11 @@ export async function importWorkbook(
             if (!existing) w("案件名が空のため、案件コードを案件名にしました");
           }
 
-          let unitPrice = parseNumberCell(r.get("unitPrice"));
-          if (unitPrice === null || unitPrice < 0) {
-            if (r.text("unitPrice")) w(`単価「${r.text("unitPrice")}」を数値として読めません`);
-            unitPrice = existing?.unitPrice ?? 0;
-            if (!existing) w("単価が未設定のため 0 にしました");
+          let amount = parseNumberCell(r.get("amount"));
+          if (amount === null || amount < 0) {
+            if (r.text("amount")) w(`受注金額「${r.text("amount")}」を数値として読めません`);
+            amount = existing?.amount ?? 0;
+            if (!existing) w("受注金額が未設定のため 0 にしました");
           }
 
           let start = parseMonthCell(r.get("start"));
@@ -449,7 +460,7 @@ export async function importWorkbook(
             id: existing?.id ?? uid("p_"),
             code: e.code,
             name,
-            unitPrice,
+            amount,
             startMonth: start,
             endMonth: end,
             required,
@@ -465,7 +476,7 @@ export async function importWorkbook(
             report.projects.added++;
             report.projects.addedNames.push(`${p.code} ${p.name}`);
           } else if (
-            prev.code !== p.code || prev.name !== p.name || prev.unitPrice !== p.unitPrice ||
+            prev.code !== p.code || prev.name !== p.name || prev.amount !== p.amount ||
             prev.startMonth !== p.startMonth || prev.endMonth !== p.endMonth || prev.color !== p.color ||
             (prev.note ?? "") !== (p.note ?? "") ||
             JSON.stringify(prev.required) !== JSON.stringify(p.required)
@@ -513,11 +524,13 @@ export async function importWorkbook(
       const importedByKey = new Map<string, Assignment>();
       const seenMembers = new Map<ID, number>();
       const ws = wsAssign;
+      const hpm = hoursPerMonthOf(current);
+      const { min: hMin, max: hMax } = hoursRange(hpm);
 
       for (const r of sh.rows) {
         const id = r.text("id");
         const name = r.text("member");
-        if (!id && (TOTAL_ROW_LABELS as readonly string[]).includes(name)) continue;
+        if (!id && ([...TOTAL_ROW_LABELS, ...LEGACY_TOTAL_ROW_LABELS] as string[]).includes(name)) continue;
         const row = ws.getRow(r.rowNo);
         const cells = monthCols.map((mc) => ({ month: mc.month, text: cellText(row.getCell(mc.col).value) }));
         const hasContent = cells.some((c) => c.text);
@@ -547,37 +560,48 @@ export async function importWorkbook(
             const w = (msg: string) => warnings.push(at(sh.name, r.rowNo, ` ${month}`) + msg);
             const m = ASSIGNMENT_LINE_RE.exec(line);
             if (!m) {
-              w(`「${line}」を読めないため読み飛ばしました（書式: 案件コード [役割] ×按分）`);
+              w(`「${line}」を読めないため読み飛ばしました（書式: 案件コード [役割] 工数h　例: PRJ-2026-001 [PL] 80h）`);
               continue;
             }
-            const [, code, statusName, ratioText] = m;
+            const [, code, statusName, ratioText, hoursText] = m;
             const project = projectByCode.get(key(code));
             if (!project) {
               w(`案件コード「${code}」が見つからないため読み飛ばしました`);
               continue;
             }
-            let ratio = 1;
-            if (ratioText !== undefined) {
-              ratio = Number(ratioText);
-              if (!Number.isFinite(ratio)) {
-                w(`按分「${ratioText}」を数値として読めないため読み飛ばしました`);
-                continue;
-              }
-              if (ratio > 1) {
-                w(`按分 ${ratioText} は 1 を超えるため 1 にしました`);
-                ratio = 1;
-              } else if (ratio < RATIO_MIN) {
-                w(`按分 ${ratioText} は小さすぎるため ${RATIO_MIN} にしました`);
-                ratio = RATIO_MIN;
-              }
+            // 工数は時間に揃えて検証する（旧形式の按分は ratio × 1人月時間 に換算）
+            let hours = hpm;
+            let given = "";
+            let clamped = false;
+            if (hoursText !== undefined) {
+              hours = Number(hoursText);
+              given = `${hoursText}h`;
+            } else if (ratioText !== undefined) {
+              hours = Number(ratioText) * hpm;
+              given = `按分 ${ratioText}（${Number.isFinite(hours) ? ratioToHours(Number(ratioText), hpm) : "?"}h）`;
             }
+            if (!Number.isFinite(hours)) {
+              w(`工数「${hoursText ?? ratioText}」を数値として読めないため読み飛ばしました`);
+              continue;
+            }
+            if (hours > hMax) {
+              w(`工数 ${given} は上限 ${hMax}h を超えるため ${hMax}h にしました`);
+              hours = hMax;
+              clamped = true;
+            } else if (hours < hMin) {
+              w(`工数 ${given} は下限 ${hMin}h 未満のため ${hMin}h にしました`);
+              hours = hMin;
+              clamped = true;
+            }
+            // 旧形式の按分は書かれた値をそのまま使う（時間経由の誤差を避ける）
+            let ratio = ratioText !== undefined && !clamped ? Number(ratioText) : hours / hpm;
             let statusId: ID | undefined;
             if (statusName !== undefined && statusName.trim()) statusId = findStatus(statusName).id;
 
             const k = `${month}|${member.id}|${project.id}`;
             const prev = prevByKey.get(k);
-            // 表示用に丸めた値が同じなら元の精度を保つ
-            if (prev && Math.round(prev.ratio * 100) === Math.round(ratio * 100)) ratio = prev.ratio;
+            // 出力時に丸めた時間（0.1h 単位）が同じなら元の精度を保つ
+            if (prev && ratioToHours(prev.ratio, hpm) === ratioToHours(ratio, hpm)) ratio = prev.ratio;
             if (importedByKey.has(k)) w(`案件「${project.code}」が同じ月に重複しているため、後の記述を採用しました`);
             const a: Assignment = {
               id: prev?.id ?? importedByKey.get(k)?.id ?? uid("a_"),

@@ -6,9 +6,9 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "framer-motion";
 import type { ID, ImportReport } from "@shared/types";
-import { useStore } from "@/lib/store";
+import { hoursPerMonthOf, useStore } from "@/lib/store";
 import { exportUrl, importXlsx } from "@/lib/api";
-import { Button, ColorSwatch, ConfirmPopover, Icon, IconButton, InlineEdit, PALETTE, Select, TextInput } from "@/components/ui";
+import { Button, ColorSwatch, ConfirmPopover, Icon, IconButton, InlineEdit, NumberInput, PALETTE, Select, TextInput } from "@/components/ui";
 import "./SettingsView.css";
 
 const ease = [0.2, 0.8, 0.2, 1] as const;
@@ -30,20 +30,20 @@ function Section({ no, title, en, desc, children }: { no: string; title: string;
 export default function SettingsView() {
   const settings = useStore((s) => s.db.settings);
   const updateSettings = useStore((s) => s.updateSettings);
+  const hpm = useStore((s) => hoursPerMonthOf(s.db));
 
   return (
     <div className="page settings">
       <header className="page-head">
         <div>
-          <div className="eyebrow">Settings</div>
-          <h1 className="h1">設定<em>, quietly.</em></h1>
+          <h1 className="h1">設定</h1>
           <div className="page-head__meta">
             <span>会社・年度・役職・役割・出力・バックアップ</span>
           </div>
         </div>
       </header>
 
-      <Section no="01" title="会社" en="Company" desc="年度の区切りは全画面・Excel 出力に反映されます。">
+      <Section no="01" title="会社" en="Company" desc="年度の区切りと 1人月の時間は全画面・Excel 出力に反映されます。">
         <div className="st-grid2">
           <label className="st-field">
             <span className="eyebrow">会社名</span>
@@ -67,6 +67,11 @@ export default function SettingsView() {
               ))}
             </div>
           </div>
+          <label className="st-field">
+            <span className="eyebrow">1人月の時間</span>
+            <NumberInput value={hpm} min={1} max={744} step={1} suffix="h" onChange={(hoursPerMonth) => updateSettings({ hoursPerMonth })} aria-label="1人月の時間" />
+            <span className="st-hint">アサインの工数は時間で入力・表示します（{hpm}h = 1人月）。Excel のアサインセルも「80h」のように時間で書きます。</span>
+          </label>
         </div>
       </Section>
 
@@ -82,7 +87,7 @@ export default function SettingsView() {
         no="04"
         title="Excel"
         en="Export / Import"
-        desc="メンバー・案件・年度アサイン・売上サマリ・説明の 5 シートを生成します。Excel で編集したファイルはそのまま取り込めます。"
+        desc="メンバー・案件・年度アサイン・稼働サマリ・説明の 5 シートを生成します。Excel で編集したファイルはそのまま取り込めます。"
       >
         <ExportPanel />
         <ExcelImportPanel />
@@ -280,7 +285,7 @@ function ExportPanel() {
         <span className="num muted small">{year}.{String(start).padStart(2, "0")} — {endYear}.{String(endMonth).padStart(2, "0")}</span>
       </div>
       <ol className="st-export__sheets">
-        {["メンバー", "案件", "アサイン", "売上サマリ", "説明"].map((s, i) => (
+        {["メンバー", "案件", "アサイン", "稼働サマリ", "説明"].map((s, i) => (
           <li key={s}><span className="num muted">{String(i + 1).padStart(2, "0")}</span>{s}</li>
         ))}
       </ol>

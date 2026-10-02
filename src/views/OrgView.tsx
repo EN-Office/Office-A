@@ -175,8 +175,8 @@ export default function OrgView() {
     <div className="page org">
       <header className="page-head">
         <div>
-          <div className="eyebrow">Organization · {fy}年度</div>
-          <h1 className="h1 org-title">組織<em>, people.</em></h1>
+          <div className="eyebrow">{fy}年度</div>
+          <h1 className="h1 org-title">組織</h1>
           <div className="page-head__meta">
             <span>人数 <b className="num">{db.members.length}</b> 名</span>
             <span>役職数 <b className="num">{db.roles.length}</b></span>

@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import type { Assignment, DB, ID, Member, MonthKey, Project, Role, RoleStatus, Settings } from "@shared/types";
 import { emptyDB, uid } from "@shared/types";
-import { fiscalMonths, fiscalYearOf } from "@shared/types";
+import { fiscalMonths, fiscalYearOf, hoursRange } from "@shared/types";
 import { fetchDB, saveDB } from "./api";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -252,12 +252,27 @@ export const selectMemberMap = (db: DB) => new Map(db.members.map((m) => [m.id, 
 export const selectRoleMap = (db: DB) => new Map(db.roles.map((r) => [r.id, r]));
 export const selectStatusMap = (db: DB) => new Map(db.roleStatuses.map((s) => [s.id, s]));
 
-/** 月売上 = Σ unitPrice × ratio */
-export function monthlyRevenue(db: DB, month: MonthKey): number {
-  const pm = selectProjectMap(db);
-  return db.assignments
-    .filter((a) => a.month === month)
-    .reduce((sum, a) => sum + (pm.get(a.projectId)?.unitPrice ?? 0) * a.ratio, 0);
+/**
+ * 受注金額合計 = 指定月範囲（年度）と契約期間が重なる案件の amount の合計。
+ * 受注金額は入力値の集計のみで、稼働（ratio / 時間）とは掛け合わせない
+ */
+export function contractTotal(db: DB, months: MonthKey[]): number {
+  if (months.length === 0) return 0;
+  const first = months[0];
+  const last = months[months.length - 1];
+  return db.projects
+    .filter((p) => p.startMonth <= last && p.endMonth >= first)
+    .reduce((sum, p) => sum + (Number.isFinite(p.amount) ? p.amount : 0), 0);
+}
+
+/* ---------- 工数（時間 ⇔ 人月）。換算本体は shared/types.ts ---------- */
+
+export { DEFAULT_HOURS_PER_MONTH, hoursPerMonthOf, hoursRange, hoursToRatio, ratioToHours } from "@shared/types";
+
+/** 工数（時間）を 1h 〜 2 × hpm に収める */
+export function clampHours(hours: number, hpm: number): number {
+  const { min, max } = hoursRange(hpm);
+  return Math.min(max, Math.max(min, hours));
 }
 
 export function formatJPY(n: number): string {

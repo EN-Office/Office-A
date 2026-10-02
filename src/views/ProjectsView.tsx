@@ -1,17 +1,17 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { compareMonth, isWithin, parseMonth, type ID, type MonthKey, type Project, type RoleStatus } from "@shared/types";
-import { formatJPY, selectFiscalMonths, selectProjectFulfilment, useStore } from "@/lib/store";
+import { contractTotal, formatJPY, selectFiscalMonths, selectProjectFulfilment, useStore } from "@/lib/store";
 import {
   Button, Chip, ColorSwatches, ConfirmPopover, Drawer, Icon, IconButton, MonthInput, NumberInput, PALETTE, Stepper, TextInput,
 } from "@/components/ui";
 import "./ProjectsView.css";
 
-type SortKey = "code" | "name" | "price" | "start";
+type SortKey = "code" | "name" | "amount" | "start";
 const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: "code", label: "コード" },
   { key: "name", label: "名前" },
-  { key: "price", label: "単価" },
+  { key: "amount", label: "受注金額" },
   { key: "start", label: "開始" },
 ];
 
@@ -54,13 +54,13 @@ export default function ProjectsView() {
     const cmp: Record<SortKey, (a: Project, b: Project) => number> = {
       code: (a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }),
       name: (a, b) => a.name.localeCompare(b.name, "ja"),
-      price: (a, b) => a.unitPrice - b.unitPrice,
+      amount: (a, b) => a.amount - b.amount,
       start: (a, b) => compareMonth(a.startMonth, b.startMonth),
     };
     return out.sort((a, b) => cmp[sort.key](a, b) * sort.dir);
   }, [db.projects, q, sort, onlyThisYear, months]);
 
-  const totalPrice = useMemo(() => db.projects.reduce((s, p) => s + p.unitPrice, 0), [db.projects]);
+  const totalAmount = useMemo(() => contractTotal(db, months), [db, months]);
   const activeCount = useMemo(
     () => db.projects.filter((p) => !(compareMonth(p.endMonth, months[0]) < 0 || compareMonth(p.startMonth, months[11]) > 0)).length,
     [db.projects, months],
@@ -74,7 +74,7 @@ export default function ProjectsView() {
     const p = addProject({
       code,
       name: "新規案件",
-      unitPrice: 1_000_000,
+      amount: 0,
       startMonth: months[0],
       endMonth: months[11],
       required: [],
@@ -93,12 +93,12 @@ export default function ProjectsView() {
     <div className="page projects">
       <header className="page-head">
         <div>
-          <div className="eyebrow">Projects · {fy}年度</div>
-          <h1 className="h1">案件<em>, in&nbsp;motion.</em></h1>
+          <div className="eyebrow">{fy}年度</div>
+          <h1 className="h1">案件</h1>
           <div className="page-head__meta">
             <span>登録 <b className="num">{db.projects.length}</b> 件</span>
             <span>今年度稼働 <b className="num">{activeCount}</b> 件</span>
-            <span>平均単価 <b className="num">{db.projects.length ? formatJPY(totalPrice / db.projects.length) : "—"}</b></span>
+            <span>受注金額合計 <b className="num">{formatJPY(totalAmount)}</b></span>
           </div>
         </div>
         <div className="page-head__actions">
@@ -212,8 +212,8 @@ function ProjectCard({ project: p, months, statusMap, fulfil: f, members, onOpen
       <h2 className="pj-card__name">{p.name}</h2>
 
       <div className="pj-card__price">
-        <span className="num pj-card__yen">{formatJPY(p.unitPrice)}</span>
-        <span className="muted small">/ 人月</span>
+        <span className="muted small">受注金額</span>
+        <span className="num pj-card__yen">{formatJPY(p.amount)}</span>
       </div>
 
       <div className="pj-tl" aria-label={`期間 ${p.startMonth} 〜 ${p.endMonth}`}>
@@ -317,8 +317,8 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
             <Field label="コード">
               <TextInput mono value={p.code} onChange={(code) => up({ code })} aria-label="コード" />
             </Field>
-            <Field label="単価" hint="1人月あたり">
-              <NumberInput currency value={p.unitPrice} min={0} onChange={(unitPrice) => up({ unitPrice })} suffix="/ 人月" aria-label="単価" />
+            <Field label="受注金額" hint="案件全体の契約額（入力値をそのまま表示）">
+              <NumberInput currency value={p.amount} min={0} onChange={(amount) => up({ amount })} aria-label="受注金額" />
             </Field>
           </div>
 

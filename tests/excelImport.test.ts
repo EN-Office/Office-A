@@ -98,14 +98,14 @@ describe("importWorkbook", () => {
 
       const asg = wb.getWorksheet("アサイン")!;
       // 4) セルの書き換え
-      cellAt(asg, "m04", "2026-05").value = "PRJ-2026-002 [PM] ×0.5";
+      cellAt(asg, "m04", "2026-05").value = "PRJ-2026-002 [PM] 80h";
       // 新人の行を名前だけで追加し、新規案件にアサイン
       const header = asg.getRow(1);
       const values: Record<number, string> = { 2: "新人 太郎" };
       header.eachCell((c, i) => {
         if (c.value === "2026-10") values[i] = "PRJ-2026-099 [QA]";
       });
-      const row = asg.insertRow(rowIndexOf(asg, "月別売上合計"), []);
+      const row = asg.insertRow(rowIndexOf(asg, "月別稼働人月"), []);
       for (const [i, v] of Object.entries(values)) row.getCell(Number(i)).value = v;
     });
 
@@ -126,7 +126,7 @@ describe("importWorkbook", () => {
     const qa = next.roleStatuses.find((s) => s.name === "QA")!;
     expect(qa).toBeTruthy();
     const p99 = next.projects.find((p) => p.code === "PRJ-2026-099")!;
-    expect(p99).toMatchObject({ name: "新規案件", unitPrice: 500000, startMonth: "2026-10", endMonth: "2027-03" });
+    expect(p99).toMatchObject({ name: "新規案件", amount: 500000, startMonth: "2026-10", endMonth: "2027-03" });
     expect(p99.required).toEqual([{ statusId: "st_pm", count: 1 }, { statusId: qa.id, count: 2 }]);
     expect(cellOf(next, rookie.id, "2026-10")).toEqual([{ projectId: p99.id, statusId: qa.id, ratio: 1 }]);
     // セル書き換え
@@ -184,20 +184,90 @@ describe("importWorkbook", () => {
     expect(report.warnings.some((w) => w.includes("データ行がない"))).toBe(true);
   });
 
-  it("skips malformed lines and clamps ratios above 1 with warnings", async () => {
+  it("skips malformed lines and clamps hours to 1..2×hoursPerMonth with warnings", async () => {
     const db = seedDB(NOW);
     const buf = await edit(await exported(db), (wb) => {
       const ws = wb.getWorksheet("アサイン")!;
-      cellAt(ws, "m10", "2026-04").value = "PRJ-2026-004 ×1.5\nPRJ-2026-001 なにか 変な行\nPRJ-9999-999";
-      cellAt(ws, "m09", "2026-04").value = "PRJ-2026-002"; // 役割・按分なしの最小形
+      cellAt(ws, "m10", "2026-04").value = "PRJ-2026-004 400h\nPRJ-2026-001 なにか 変な行\nPRJ-9999-999";
+      cellAt(ws, "m09", "2026-04").value = "PRJ-2026-002"; // 役割・工数なしの最小形 = 1人月
+      cellAt(ws, "m09", "2026-05").value = "PRJ-2026-002 0.5h";
     });
     const { db: next, report } = await importWorkbook(buf, db);
-    expect(cellOf(next, "m10", "2026-04")).toEqual([{ projectId: "p04", statusId: undefined, ratio: 1 }]);
+    expect(cellOf(next, "m10", "2026-04")).toEqual([{ projectId: "p04", statusId: undefined, ratio: 2 }]);
     expect(cellOf(next, "m09", "2026-04")).toEqual([{ projectId: "p02", statusId: undefined, ratio: 1 }]);
-    expect(report.warnings).toHaveLength(3);
-    expect(report.warnings[0]).toMatch(/^アサインシート \d+行目 2026-04: 按分 1\.5 は 1 を超えるため 1 にしました$/);
-    expect(report.warnings[1]).toContain("読めないため読み飛ばしました");
-    expect(report.warnings[2]).toContain("案件コード「PRJ-9999-999」が見つからない");
+    expect(cellOf(next, "m09", "2026-05")).toEqual([{ projectId: "p02", statusId: undefined, ratio: 1 / 160 }]);
+    expect(report.warnings).toHaveLength(4);
+    const has = (re: RegExp) => expect(report.warnings.some((w) => re.test(w))).toBe(true);
+    has(/^アサインシート \d+行目 2026-04: 工数 400h は上限 320h を超えるため 320h にしました$/);
+    has(/2026-04: 「PRJ-2026-001 なにか 変な行」を読めないため読み飛ばしました/);
+    has(/案件コード「PRJ-9999-999」が見つからない/);
+    has(/^アサインシート \d+行目 2026-05: 工数 0\.5h は下限 1h 未満のため 1h にしました$/);
+  });
+
+  it("reads hours (h / H / full-width ｈ) and legacy ×ratio lines", async () => {
+    const db = seedDB(NOW);
+    const buf = await edit(await exported(db), (wb) => {
+      const ws = wb.getWorksheet("アサイン")!;
+      cellAt(ws, "m09", "2026-04").value = "PRJ-2026-002 [PL] 100h\nPRJ-2026-003 40H\nPRJ-2026-005 １２０ｈ";
+      cellAt(ws, "m10", "2026-04").value = "PRJ-2026-004 ×0.5\nPRJ-2026-001 x0.25\nPRJ-2026-002 *1.5";
+    });
+    const { db: next, report } = await importWorkbook(buf, db);
+    const sortByProject = (xs: ReturnType<typeof cellOf>) => [...xs].sort((a, b) => a.projectId.localeCompare(b.projectId));
+    expect(sortByProject(cellOf(next, "m09", "2026-04"))).toEqual([
+      { projectId: "p02", statusId: "st_pl", ratio: 0.625 },
+      { projectId: "p03", statusId: undefined, ratio: 0.25 },
+      { projectId: "p05", statusId: undefined, ratio: 0.75 },
+    ]);
+    expect(sortByProject(cellOf(next, "m10", "2026-04"))).toEqual([
+      { projectId: "p01", statusId: undefined, ratio: 0.25 },
+      { projectId: "p02", statusId: undefined, ratio: 1.5 },
+      { projectId: "p04", statusId: undefined, ratio: 0.5 },
+    ]);
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("round-trips fractional hours losslessly (e.g. 100h = 0.625, 1/3人月)", async () => {
+    const db = seedDB(NOW);
+    const a04 = db.assignments.find((a) => a.memberId === "m04" && a.month === "2026-04")!;
+    a04.ratio = 0.625;
+    const a06 = db.assignments.find((a) => a.memberId === "m06" && a.month === "2026-04")!;
+    a06.ratio = 1 / 3;
+    const buf = await exported(db);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    expect(cellAt(wb.getWorksheet("アサイン")!, "m04", "2026-04").value).toBe("PRJ-2026-001 [PM] 100h");
+    expect(cellAt(wb.getWorksheet("アサイン")!, "m06", "2026-04").value).toBe("PRJ-2026-001 [PL] 53.3h");
+    const { db: next, report } = await importWorkbook(buf, db);
+    expect(byId(next.assignments)).toEqual(byId(db.assignments));
+    expect(report.warnings).toEqual([]);
+    // 既存アサインがない（新規）場合も 時間 ÷ 160 で復元される
+    const fresh = { ...db, assignments: db.assignments.filter((a) => a.id !== a04.id) };
+    const { db: next2 } = await importWorkbook(buf, fresh);
+    expect(cellOf(next2, "m04", "2026-04")).toEqual([{ projectId: "p01", statusId: "st_pm", ratio: 0.625 }]);
+  });
+
+  it("uses settings.hoursPerMonth for export and import", async () => {
+    const db = seedDB(NOW);
+    db.settings.hoursPerMonth = 140;
+    const buf = await exported(db);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    expect(cellAt(wb.getWorksheet("アサイン")!, "m04", "2026-04").value).toBe("PRJ-2026-001 [PM] 70h");
+    const { db: next, report } = await importWorkbook(buf, db);
+    expect(byId(next.assignments)).toEqual(byId(db.assignments));
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("reads the legacy 単価 column as 受注金額", async () => {
+    const db = seedDB(NOW);
+    const buf = await edit(await exported(db), (wb) => {
+      const ws = wb.getWorksheet("案件")!;
+      ws.getRow(1).eachCell((c) => { if (c.value === "受注金額") c.value = "単価"; });
+      cellAt(ws, "p02", "単価").value = 30_000_000;
+    });
+    const { db: next } = await importWorkbook(buf, db);
+    expect(next.projects.find((p) => p.id === "p02")!.amount).toBe(30_000_000);
+    expect(next.projects.find((p) => p.id === "p01")!.amount).toBe(48_000_000);
   });
 
   it("accepts months typed as Excel dates and creates unknown roles", async () => {

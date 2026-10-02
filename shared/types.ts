@@ -40,8 +40,11 @@ export interface Project {
   id: ID;
   code: string;
   name: string;
-  /** 1人月あたり単価（円） */
-  unitPrice: number;
+  /**
+   * 受注金額（円、案件全体の契約額）。入力値をそのまま保持・表示するだけで、
+   * 稼働（ratio / 時間）と掛け合わせる等の計算には使わない
+   */
+  amount: number;
   startMonth: MonthKey;
   endMonth: MonthKey;
   required: RequiredRole[];
@@ -56,7 +59,7 @@ export interface Assignment {
   projectId: ID;
   /** 案件内での役割 */
   statusId?: ID;
-  /** 稼働按分 0.0〜1.0（既定 1） */
+  /** 稼働按分（1人月に対する割合。既定 1）。UI では時間（ratio × hoursPerMonth）で入出力する */
   ratio: number;
 }
 
@@ -65,6 +68,8 @@ export interface Settings {
   /** 年度開始月 1-12（既定 4） */
   fiscalYearStartMonth: number;
   currency: "JPY";
+  /** 1人月あたりの時間（既定 160h）。UI の工数入力・表示と Excel の「80h」表記の換算に使う */
+  hoursPerMonth: number;
 }
 
 export interface DB {
@@ -78,6 +83,30 @@ export interface DB {
 }
 
 /* ---------- ユーティリティ（純関数、両環境で利用） ---------- */
+
+/** 1人月の時間の既定値 */
+export const DEFAULT_HOURS_PER_MONTH = 160;
+
+/** 設定の 1人月時間（未設定・不正値なら 160） */
+export function hoursPerMonthOf(src: { settings?: Partial<Settings> } | undefined): number {
+  const h = src?.settings?.hoursPerMonth;
+  return typeof h === "number" && Number.isFinite(h) && h > 0 ? h : DEFAULT_HOURS_PER_MONTH;
+}
+
+/** ratio（人月）→ 時間（小数 1 桁に丸め） */
+export function ratioToHours(ratio: number, hpm: number): number {
+  return Math.round(ratio * hpm * 10) / 10;
+}
+
+/** 時間 → ratio（人月）。丸めずにそのまま保持する */
+export function hoursToRatio(hours: number, hpm: number): number {
+  return hours / hpm;
+}
+
+/** 1アサインあたりの許容工数（時間）: 1h 〜 2 × 1人月時間（残業込み） */
+export function hoursRange(hpm: number): { min: number; max: number } {
+  return { min: 1, max: hpm * 2 };
+}
 
 export function monthKey(year: number, month1to12: number): MonthKey {
   return `${year}-${String(month1to12).padStart(2, "0")}`;
@@ -166,7 +195,7 @@ export function emptyDB(): DB {
     roleStatuses: DEFAULT_ROLE_STATUSES,
     projects: [],
     assignments: [],
-    settings: { companyName: "Office-A", fiscalYearStartMonth: 4, currency: "JPY" },
+    settings: { companyName: "Office-A", fiscalYearStartMonth: 4, currency: "JPY", hoursPerMonth: 160 },
   };
 }
 

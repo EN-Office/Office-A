@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { fiscalMonths } from "@shared/types";
-import { selectStatusMap, useStore } from "../lib/store";
-import RevenueChart, { type RevenueDatum } from "../components/dashboard/RevenueChart";
-import { currentMonthKey, fmtYen, fmtYenShort, monthNum, projectActiveIn, r2 } from "../components/schedule/helpers";
+import { contractTotal, hoursPerMonthOf, ratioToHours, selectStatusMap, useStore } from "../lib/store";
+import WorkloadChart, { type WorkloadDatum } from "../components/dashboard/WorkloadChart";
+import { currentMonthKey, fmtHours, fmtManMonth, fmtYen, fmtYenShort, monthNum, projectActiveIn, r2 } from "../components/schedule/helpers";
 import "../components/dashboard/dashboard.css";
 
 const fade = (i: number) => ({
@@ -18,20 +18,21 @@ export default function DashboardView() {
   const months = useMemo(() => fiscalMonths(fiscalYear, db.settings.fiscalYearStartMonth), [fiscalYear, db.settings.fiscalYearStartMonth]);
   const nowKey = currentMonthKey();
   const statusMap = useMemo(() => selectStatusMap(db), [db]);
+  const hpm = hoursPerMonthOf(db);
 
   const d = useMemo(() => {
     const mset = new Set(months);
     const projMap = new Map(db.projects.map((p) => [p.id, p]));
     const asg = db.assignments.filter((a) => mset.has(a.month) && projMap.has(a.projectId));
 
-    // 月 × 案件 売上
-    const chart: RevenueDatum[] = months.map((month) => {
+    // 月 × 案件 稼働時間（Σratio × 1人月時間）
+    const chart: WorkloadDatum[] = months.map((month) => {
       const per = new Map<string, number>();
-      for (const a of asg) if (a.month === month) per.set(a.projectId, (per.get(a.projectId) ?? 0) + projMap.get(a.projectId)!.unitPrice * a.ratio);
-      const parts = db.projects.filter((p) => per.has(p.id)).map((p) => ({ project: p, value: per.get(p.id)! }));
+      for (const a of asg) if (a.month === month) per.set(a.projectId, (per.get(a.projectId) ?? 0) + a.ratio);
+      const parts = db.projects.filter((p) => per.has(p.id)).map((p) => ({ project: p, value: ratioToHours(per.get(p.id)!, hpm) }));
       return { month, total: parts.reduce((s, p) => s + p.value, 0), parts };
     });
-    const revenue = chart.reduce((s, c) => s + c.total, 0);
+    const contract = contractTotal(db, months);
 
     const memberIds = new Set(db.members.map((m) => m.id));
     const asgM = asg.filter((a) => memberIds.has(a.memberId));
@@ -46,12 +47,12 @@ export default function DashboardView() {
     const activeProjects = db.projects.filter((p) => projectActiveIn(p, months)).sort((a, b) => a.code.localeCompare(b.code));
     const projRows = activeProjects.map((p) => {
       const mine = asgM.filter((a) => a.projectId === p.id);
-      const rev = mine.reduce((s, a) => s + p.unitPrice * a.ratio, 0);
+      const mm = mine.reduce((s, a) => s + a.ratio, 0);
       const req = p.required.map((r) => {
         const got = new Set(mine.filter((a) => a.statusId === r.statusId).map((a) => a.memberId)).size;
         return { ...r, got };
       });
-      return { p, rev, req, people: new Set(mine.map((a) => a.memberId)).size };
+      return { p, mm, req, people: new Set(mine.map((a) => a.memberId)).size };
     });
 
     const roleRows = db.roles.map((role) => {
@@ -69,11 +70,12 @@ export default function DashboardView() {
       .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
 
-    return { chart, revenue, working: working.size, avg, projRows, roleRows, free, activeCount: activeProjects.length };
-  }, [db, months]);
+    const totalMM = chart.reduce((s, c) => s + c.total, 0) / hpm;
+    return { chart, contract, totalMM, working: working.size, avg, projRows, roleRows, free, activeCount: activeProjects.length };
+  }, [db, months, hpm]);
 
   const kpis = [
-    { label: "年間売上見込", value: fmtYenShort(d.revenue), sub: fmtYen(d.revenue) },
+    { label: "受注金額合計", value: fmtYenShort(d.contract), sub: fmtYen(d.contract) },
     { label: "案件数", value: String(d.activeCount), sub: `全 ${db.projects.length} 件中` },
     { label: "稼働人数", value: String(d.working), sub: `全 ${db.members.length} 名中` },
     { label: "平均稼働率", value: `${Math.round(d.avg * 100)}%`, sub: "全メンバー × 12ヶ月" },
@@ -82,8 +84,8 @@ export default function DashboardView() {
   return (
     <div className="dash-root">
       <motion.header className="dash-head" {...fade(0)}>
-        <div className="dash-kicker dash-mono">OVERVIEW · {months[0]} — {months[11]}</div>
-        <h1 className="dash-title">{fiscalYear}年度の<i>見通し</i></h1>
+        <div className="dash-kicker dash-mono">{fiscalYear}年度 · {months[0]} — {months[11]}</div>
+        <h1 className="dash-title">開発本部BS部プロジェクト管理</h1>
       </motion.header>
 
       <motion.section className="dash-kpis" {...fade(1)}>
@@ -97,8 +99,9 @@ export default function DashboardView() {
       </motion.section>
 
       <motion.section className="dash-sec" {...fade(2)}>
-        <h2 className="dash-h2">月別<i>売上</i></h2>
-        <RevenueChart data={d.chart} nowKey={nowKey} />
+        <h2 className="dash-h2">月別<i>稼働</i></h2>
+        <p className="dash-note dash-note--top">案件別の稼働時間（{hpm}h = 1人月）· 年度合計 {fmtManMonth(d.totalMM)} · {fmtHours(d.totalMM * hpm)}</p>
+        <WorkloadChart data={d.chart} nowKey={nowKey} hoursPerMonth={hpm} />
         <ul className="dash-legend">
           {db.projects.filter((p) => d.chart.some((c) => c.parts.some((x) => x.project.id === p.id))).map((p) => (
             <li key={p.id}><i style={{ background: p.color }} /><span className="dash-mono">{p.code}</span> {p.name}</li>
@@ -115,17 +118,17 @@ export default function DashboardView() {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>コード</th><th>案件名</th><th className="r">単価</th><th>期間</th><th className="r">年間売上</th><th>必要役割（アサイン人数 / 必要数）</th>
+                  <th>コード</th><th>案件名</th><th className="r">受注金額</th><th>期間</th><th className="r">年度稼働</th><th>必要役割（アサイン人数 / 必要数）</th>
                 </tr>
               </thead>
               <tbody>
-                {d.projRows.map(({ p, rev, req }) => (
+                {d.projRows.map(({ p, mm, req }) => (
                   <tr key={p.id}>
                     <td className="dash-mono"><i className="dash-sw" style={{ background: p.color }} />{p.code}</td>
                     <td>{p.name}</td>
-                    <td className="r dash-mono">{fmtYen(p.unitPrice)}</td>
+                    <td className="r dash-mono">{fmtYen(p.amount)}</td>
                     <td className="dash-mono dash-period">{p.startMonth} → {p.endMonth}</td>
-                    <td className="r dash-mono">{fmtYen(rev)}</td>
+                    <td className="r dash-mono">{mm ? <>{fmtManMonth(mm)}<span className="dash-muted">{fmtHours(ratioToHours(mm, hpm))}</span></> : "—"}</td>
                     <td>
                       {req.length === 0 ? <span className="dash-muted">指定なし</span> : (
                         <div className="dash-reqs">

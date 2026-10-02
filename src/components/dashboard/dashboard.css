@@ -1,11 +1,11 @@
 /* ===== Dashboard (dash-) ===== */
-.dash-root { display: flex; flex-direction: column; gap: var(--space-7); max-width: 1200px; padding: var(--space-8) var(--space-8) var(--space-9); }
+.dash-root { display: flex; flex-direction: column; gap: var(--space-6); max-width: 1200px; padding: var(--space-6) var(--space-8) var(--space-9); }
 .dash-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .dash-muted { color: var(--ink-3); font-size: 11px; margin-left: 8px; }
 .dash-kicker { font-size: 11px; letter-spacing: .14em; color: var(--ink-3); margin-bottom: var(--space-2); }
-.dash-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(52px, 8vw, 112px); line-height: .92; letter-spacing: -.025em; }
-.dash-title i, .dash-h2 i { font-style: normal; font-weight: 700; color: var(--accent); }
-.dash-h2 { margin: 0 0 var(--space-4); font-family: var(--font-display); font-weight: 400; font-size: 34px; line-height: 1; letter-spacing: -.01em; padding-top: var(--space-3); border-top: 1px solid var(--ink); }
+.dash-title { margin: 0; font-family: var(--font-display); font-weight: var(--h1-weight); font-size: var(--h1-size); line-height: 1.2; letter-spacing: -.01em; color: var(--ink); }
+.dash-h2 i { font-style: normal; font-weight: 700; color: inherit; }
+.dash-h2 { margin: 0 0 var(--space-4); font-family: var(--font-display); font-weight: 400; font-size: 20px; line-height: 1; letter-spacing: -.01em; padding-top: var(--space-3); border-top: 1px solid var(--ink); }
 .dash-empty { color: var(--ink-3); font-size: 13px; padding: var(--space-5) 0; }
 
 .dash-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line-strong); }
@@ -67,3 +67,4 @@
 .dash-free-c { text-align: right; font-size: 14px; }
 .dash-free-c small { font-size: 10px; color: var(--ink-3); margin-left: 2px; }
 .dash-note { font-size: 11px; color: var(--ink-3); margin: var(--space-3) 0 0; }
+.dash-note--top { margin: calc(-1 * var(--space-2)) 0 var(--space-3); }

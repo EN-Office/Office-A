@@ -14,12 +14,13 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import type { Assignment, MonthKey, Project } from "@shared/types";
 import { fiscalMonths, flattenTree, isWithin } from "@shared/types";
-import { monthlyRevenue, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
+import { contractTotal, hoursPerMonthOf, ratioToHours, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
 import { ChipBody } from "../components/schedule/Chip";
 import { AssignmentPopover, QuickPicker, rectOf, type Anchor } from "../components/schedule/Popovers";
 import {
   cellKey,
   currentMonthKey,
+  fmtHours,
   fmtYen,
   indexAssignments,
   monthNum,
@@ -32,13 +33,14 @@ import "../components/schedule/schedule.css";
 
 interface ChipProps {
   a: Assignment;
+  hpm: number;
   project: Project;
   statusMap: ReturnType<typeof selectStatusMap>;
   onOpen: (a: Assignment, el: Element) => void;
   onFillStart: (e: React.PointerEvent, a: Assignment) => void;
 }
 
-const AssignmentChip = memo(function AssignmentChip({ a, project, statusMap, onOpen, onFillStart }: ChipProps) {
+const AssignmentChip = memo(function AssignmentChip({ a, hpm, project, statusMap, onOpen, onFillStart }: ChipProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `a:${a.id}`,
     data: { type: "chip", assignment: a },
@@ -58,7 +60,7 @@ const AssignmentChip = memo(function AssignmentChip({ a, project, statusMap, onO
         {...attributes}
         {...listeners}
         project={project}
-        ratio={a.ratio}
+        hours={ratioToHours(a.ratio, hpm)}
         status={a.statusId ? statusMap.get(a.statusId) : undefined}
         outOfRange={out}
         ghost={isDragging}
@@ -85,6 +87,7 @@ interface CellProps {
   memberId: string;
   month: MonthKey;
   mi: number;
+  hpm: number;
   list: Assignment[];
   projectMap: Map<string, Project>;
   statusMap: ReturnType<typeof selectStatusMap>;
@@ -96,7 +99,7 @@ interface CellProps {
 }
 
 const Cell = memo(function Cell({
-  memberId, month, mi, list, projectMap, statusMap, filling, isNow, onOpen, onFillStart, onAdd,
+  memberId, month, mi, hpm, list, projectMap, statusMap, filling, isNow, onOpen, onFillStart, onAdd,
 }: CellProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `c:${cellKey(memberId, month)}`, data: { memberId, month } });
   const sum = list.reduce((s, a) => s + a.ratio, 0);
@@ -115,7 +118,7 @@ const Cell = memo(function Cell({
             const p = projectMap.get(a.projectId);
             if (!p) return null;
             return (
-              <AssignmentChip key={a.id} a={a} project={p} statusMap={statusMap} onOpen={onOpen} onFillStart={onFillStart} />
+              <AssignmentChip key={a.id} a={a} hpm={hpm} project={p} statusMap={statusMap} onOpen={onOpen} onFillStart={onFillStart} />
             );
           })}
         </AnimatePresence>
@@ -131,7 +134,7 @@ const Cell = memo(function Cell({
           <span
             className={`sch-load ${over ? "is-over" : ""}`}
             style={{ width: `${Math.min(sum, 1) * 100}%` }}
-            title={`稼働 ${r2(sum)}`}
+            title={`稼働 ${fmtHours(ratioToHours(sum, hpm))}（${r2(sum)}人月）`}
           />
         )}
       </div>
@@ -152,7 +155,7 @@ function PaletteChip({ p, months }: { p: Project; months: MonthKey[] }) {
       <div className="sch-pal-main">
         <div className="sch-pal-top">
           <span className="sch-mono sch-pal-code">{p.code}</span>
-          <span className="sch-mono sch-pal-price">{fmtYen(p.unitPrice)}<small>/人月</small></span>
+          <span className="sch-mono sch-pal-price" title="受注金額">{fmtYen(p.amount)}</span>
         </div>
         <div className="sch-pal-name">{p.name}</div>
         <div className="sch-pal-period" title={`${p.startMonth} 〜 ${p.endMonth}`}>
@@ -189,6 +192,7 @@ export default function ScheduleView() {
   const statusMap = useMemo(() => selectStatusMap(db), [db]);
   const cells = useMemo(() => indexAssignments(db, months), [db, months]);
   const nowKey = currentMonthKey();
+  const hpm = hoursPerMonthOf(db);
 
   const stats = useMemo(() => {
     const monthSum = months.map(() => 0);
@@ -209,13 +213,11 @@ export default function ScheduleView() {
       used += y;
     }
     void memberIds;
-    const revenue = months.map((m) => monthlyRevenue(db, m));
     const n = rows.length;
     return {
       monthSum,
-      revenue,
       memberYear,
-      total: revenue.reduce((a, b) => a + b, 0),
+      contract: contractTotal(db, months),
       avg: n ? used / (n * 12) : 0,
       free,
     };
@@ -344,17 +346,17 @@ export default function ScheduleView() {
           <div className="sch-title-block">
             <div className="sch-kicker sch-mono">
               <button className="sch-year-btn" onClick={() => setFiscalYear(fiscalYear - 1)} aria-label="前年度">←</button>
-              FY {fiscalYear}
+              {fiscalYear}年度
               <button className="sch-year-btn" onClick={() => setFiscalYear(fiscalYear + 1)} aria-label="次年度">→</button>
             </div>
             <h1 className="sch-title">
-              アサイン<em>{fiscalYear}年度</em>
+              アサイン <em>{fiscalYear}年度</em>
             </h1>
           </div>
           <dl className="sch-summary">
             <div>
-              <dt>年間売上</dt>
-              <dd className="sch-mono">{fmtYen(stats.total)}</dd>
+              <dt>受注金額合計</dt>
+              <dd className="sch-mono">{fmtYen(stats.contract)}</dd>
             </div>
             <div>
               <dt>平均稼働率</dt>
@@ -412,6 +414,7 @@ export default function ScheduleView() {
                             memberId={member.id}
                             month={m}
                             mi={i}
+                            hpm={hpm}
                             list={cells.get(cellKey(member.id, m)) ?? EMPTY}
                             projectMap={projectMap}
                             statusMap={statusMap}
@@ -432,18 +435,16 @@ export default function ScheduleView() {
                 </tbody>
                 <tfoot>
                   <tr className="sch-foot sch-foot-1">
-                    <th className="sch-foot-label">月売上合計</th>
-                    {stats.revenue.map((v, i) => (
-                      <td key={i} className="sch-mono">{v ? fmtYen(v) : "—"}</td>
-                    ))}
-                    <td className="sch-mono sch-foot-end">{fmtYen(stats.total)}</td>
-                  </tr>
-                  <tr className="sch-foot sch-foot-2">
                     <th className="sch-foot-label">稼働人月</th>
                     {stats.monthSum.map((v, i) => (
-                      <td key={i} className="sch-mono">{v ? r2(v) : "—"}</td>
+                      <td key={i} className="sch-mono">
+                        {v ? <>{r2(v)}<span className="sch-foot-h">{fmtHours(ratioToHours(v, hpm))}</span></> : "—"}
+                      </td>
                     ))}
-                    <td className="sch-mono sch-foot-end">{r2(stats.monthSum.reduce((a, b) => a + b, 0))}</td>
+                    <td className="sch-mono sch-foot-end">
+                      {r2(stats.monthSum.reduce((a, b) => a + b, 0))}人月
+                      <span className="sch-foot-h">{fmtHours(ratioToHours(stats.monthSum.reduce((a, b) => a + b, 0), hpm))}</span>
+                    </td>
                   </tr>
                 </tfoot>
               </table>
@@ -481,7 +482,7 @@ export default function ScheduleView() {
             <ChipBody
               floating
               project={activeProject}
-              ratio={active?.type === "chip" ? active.assignment.ratio : 1}
+              hours={ratioToHours(active?.type === "chip" ? active.assignment.ratio : 1, hpm)}
               status={active?.type === "chip" && active.assignment.statusId ? statusMap.get(active.assignment.statusId) : undefined}
             />
             {active?.type === "chip" && alt && <span className="sch-copy-badge">＋ 複製</span>}

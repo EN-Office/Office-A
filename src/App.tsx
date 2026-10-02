@@ -76,7 +76,7 @@ export default function App() {
           <Route path="/org" element={<Page><OrgView /></Page>} />
           <Route path="/projects" element={<Page><ProjectsView /></Page>} />
           <Route path="/settings" element={<Page><SettingsView /></Page>} />
-          <Route path="*" element={<Page><div className="page"><h1 className="h1">Not <em>found</em></h1></div></Page>} />
+          <Route path="*" element={<Page><div className="page"><h1 className="h1">ページが見つかりません</h1></div></Page>} />
         </Routes>
       </AnimatePresence>
     </Shell>

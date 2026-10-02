@@ -3,7 +3,9 @@ import ExcelJS from "exceljs";
 import {
   flattenTree,
   fiscalMonths,
+  hoursPerMonthOf,
   isWithin,
+  ratioToHours,
   type Assignment,
   type DB,
   type MonthKey,
@@ -16,47 +18,53 @@ const TOTAL_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: {
 const THIN: Partial<ExcelJS.Border> = { style: "thin", color: { argb: "FFBFC4CE" } };
 const BORDER: Partial<ExcelJS.Borders> = { top: THIN, left: THIN, bottom: THIN, right: THIN };
 
-export const SHEET_NAMES = ["メンバー", "案件", "アサイン", "売上サマリ", "説明"] as const;
+export const SHEET_NAMES = ["メンバー", "案件", "アサイン", "稼働サマリ", "説明"] as const;
 /** アサインシート末尾の集計行（取り込み時は読み飛ばす） */
-export const TOTAL_ROW_LABELS = ["月別売上合計", "月別稼働人月"] as const;
+export const TOTAL_ROW_LABELS = ["月別稼働人月", "月別稼働時間"] as const;
 const ID_FONT: Partial<ExcelJS.Font> = { color: { argb: "FF8A8F99" } };
 
-/** アサインセル 1 行分: `<案件コード> [<役割名>] ×<ratio>`（役割なしは省略、ratio=1 は省略） */
-export function formatAssignmentLine(project: Pick<Project, "code">, statusName: string | undefined, ratio: number): string {
+/**
+ * アサインセル 1 行分: `<案件コード> [<役割名>] <時間>h`（役割なしは省略。時間は常に書く）。
+ * 時間 = ratio × 1人月時間（小数 1 桁）。取り込み側は 時間 ÷ 1人月時間 で ratio に戻す
+ */
+export function formatAssignmentLine(project: Pick<Project, "code">, statusName: string | undefined, ratio: number, hoursPerMonth: number): string {
   let s = project.code;
   if (statusName) s += ` [${statusName}]`;
-  if (Math.abs(ratio - 1) > 1e-9) s += ` ×${fmtRatio(ratio)}`;
+  s += ` ${ratioToHours(ratio, hoursPerMonth)}h`;
   return s;
 }
 
-const HELP_ROWS: Array<[string, string]> = [
-  ["Office-A Excel 取り込みルール", ""],
-  ["", ""],
-  ["全般", "このファイルを Excel で編集し、設定画面の「Excelから取り込み」で読み込むとデータに反映されます。取り込み前にプレビュー（追加・更新・削除の件数と警告）が表示されます。"],
-  ["", "各シートの 1 行目（見出し）は変更しないでください。列の並び替えは可能ですが、見出し名で列を判別します。"],
-  ["", "ID 列は既存データとの対応付けに使います。値は変更しないでください。新しく追加する行は ID を空欄にします。"],
-  ["", "行の追加・削除ができます。シートから消した行（メンバー / 案件）は取り込み時に削除され、その人・案件のアサインもすべて削除されます。"],
-  ["", "「売上サマリ」シートは参照用です。取り込み時には読み込みません。"],
-  ["", ""],
-  ["メンバー", "編集可能: 名前 / 役職 / 上長 / 備考。"],
-  ["", "役職は役職名で指定します。未登録の役職名は新しい役職（最下位）として追加されます。"],
-  ["", "上長は上長の名前で指定します（空欄はトップ）。見つからない名前は警告を出してトップ扱いになります。"],
-  ["", "ID が空欄の行は、同じ名前の既存メンバーがいればそのメンバー、いなければ新規メンバーとして扱います。"],
-  ["", "同じ上長を持つメンバーの並び順は、シートの行順になります。"],
-  ["", ""],
-  ["案件", "編集可能: 案件コード / 案件名 / 単価 / 開始 / 終了 / 必要役割 / 色 / 備考。"],
-  ["", "開始・終了は YYYY-MM 形式（例: 2026-04）。単価は 1 人月あたりの円（数値）。"],
-  ["", "必要役割は「PM×1, PL×1, 開発メンバー×3」の形式。未登録の役割名は新しい役割として追加されます。"],
-  ["", "色は #RRGGBB 形式（例: #e07a5f）。空欄の場合は自動で割り当てます。"],
-  ["", ""],
-  ["アサイン", "この年度の 12 ヶ月分のアサインを、シートの内容で置き換えます（ほかの年度のアサインは変更されません）。"],
-  ["", "1 セルに 1 件 1 行で書きます（セル内改行は Alt+Enter）。書式: 案件コード [役割名] ×按分"],
-  ["", "例: PRJ-2026-001 [PL] ×0.5 ／ PRJ-2026-002 [PM] ／ PRJ-2026-003（役割なし・按分 1）"],
-  ["", "按分は 0.05〜1。省略時は 1。1 を超える値は 1 に丸められます（警告あり）。"],
-  ["", "未登録の案件コードを書いた行は読み飛ばします（警告あり）。"],
-  ["", "メンバーは ID 列（空欄なら名前）で判別します。階層列・年間稼働列・末尾の集計行は参照用で、読み込みません。"],
-];
-
+function helpRows(hpm: number): Array<[string, string]> {
+  return [
+    ["Office-A Excel 取り込みルール", ""],
+    ["", ""],
+    ["全般", "このファイルを Excel で編集し、設定画面の「Excelから取り込み」で読み込むとデータに反映されます。取り込み前にプレビュー（追加・更新・削除の件数と警告）が表示されます。"],
+    ["", "各シートの 1 行目（見出し）は変更しないでください。列の並び替えは可能ですが、見出し名で列を判別します。"],
+    ["", "ID 列は既存データとの対応付けに使います。値は変更しないでください。新しく追加する行は ID を空欄にします。"],
+    ["", "行の追加・削除ができます。シートから消した行（メンバー / 案件）は取り込み時に削除され、その人・案件のアサインもすべて削除されます。"],
+    ["", "「稼働サマリ」シートは参照用です。取り込み時には読み込みません。"],
+    ["", `工数は時間で表します。1人月 = ${hpm}h（設定画面の「1人月の時間」で変更できます）。`],
+    ["", ""],
+    ["メンバー", "編集可能: 名前 / 役職 / 上長 / 備考。"],
+    ["", "役職は役職名で指定します。未登録の役職名は新しい役職（最下位）として追加されます。"],
+    ["", "上長は上長の名前で指定します（空欄はトップ）。見つからない名前は警告を出してトップ扱いになります。"],
+    ["", "ID が空欄の行は、同じ名前の既存メンバーがいればそのメンバー、いなければ新規メンバーとして扱います。"],
+    ["", "同じ上長を持つメンバーの並び順は、シートの行順になります。"],
+    ["", ""],
+    ["案件", "編集可能: 案件コード / 案件名 / 受注金額 / 開始 / 終了 / 必要役割 / 色 / 備考。"],
+    ["", "開始・終了は YYYY-MM 形式（例: 2026-04）。受注金額は案件全体の契約額（円、数値）で、入力値をそのまま保持します（稼働とは掛け合わせません）。"],
+    ["", "必要役割は「PM×1, PL×1, 開発メンバー×3」の形式。未登録の役割名は新しい役割として追加されます。"],
+    ["", "色は #RRGGBB 形式（例: #e07a5f）。空欄の場合は自動で割り当てます。"],
+    ["", ""],
+    ["アサイン", "この年度の 12 ヶ月分のアサインを、シートの内容で置き換えます（ほかの年度のアサインは変更されません）。"],
+    ["", "1 セルに 1 件 1 行で書きます（セル内改行は Alt+Enter）。書式: 案件コード [役割名] 工数h"],
+    ["", `例: PRJ-2026-001 [PL] 80h ／ PRJ-2026-002 [PM] ${hpm}h ／ PRJ-2026-003（役割なし・工数省略 = ${hpm}h = 1人月）`],
+    ["", `工数は時間（h）で 1〜${hpm * 2}h（${hpm}h = 1人月、残業込みで 2人月分まで）。範囲外の値は丸められます（警告あり）。小数は 0.1h 単位。`],
+    ["", "旧形式の按分（例: PRJ-2026-001 ×0.5）も読み込めます（0.5人月として扱います）。"],
+    ["", "未登録の案件コードを書いた行は読み飛ばします（警告あり）。"],
+    ["", "メンバーは ID 列（空欄なら名前）で判別します。階層列・年間稼働列・末尾の集計行は参照用で、読み込みません。"],
+  ];
+}
 
 function styleHeader(row: ExcelJS.Row): void {
   row.font = { bold: true };
@@ -82,7 +90,6 @@ function styleTotalRow(row: ExcelJS.Row): void {
 }
 
 const ratioOf = (a: Assignment): number => (typeof a.ratio === "number" && Number.isFinite(a.ratio) ? a.ratio : 1);
-const fmtRatio = (r: number): string => String(Math.round(r * 100) / 100);
 
 export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer> {
   const startMonth = db.settings?.fiscalYearStartMonth ?? 4;
@@ -94,6 +101,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
   const projectById = new Map(db.projects.map((p) => [p.id, p]));
   const tree = flattenTree(db.members);
   const yearAssignments = db.assignments.filter((a) => monthSet.has(a.month) && projectById.has(a.projectId));
+  const hpm = hoursPerMonthOf(db);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = db.settings?.companyName ?? "Office-A";
@@ -132,7 +140,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
       { header: "ID", key: "id", width: 12 },
       { header: "案件コード", key: "code", width: 16 },
       { header: "案件名", key: "name", width: 28 },
-      { header: "単価", key: "unitPrice", width: 16, style: { numFmt: JPY } },
+      { header: "受注金額", key: "amount", width: 16, style: { numFmt: JPY } },
       { header: "開始", key: "start", width: 10, style: { numFmt: "@" } },
       { header: "終了", key: "end", width: 10, style: { numFmt: "@" } },
       { header: "必要役割", key: "required", width: 36 },
@@ -144,7 +152,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
         id: p.id,
         code: p.code,
         name: p.name,
-        unitPrice: p.unitPrice,
+        amount: p.amount,
         start: p.startMonth,
         end: p.endMonth,
         required: (p.required ?? [])
@@ -187,7 +195,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
         lines = Math.max(lines, list.length);
         total += list.reduce((s, a) => s + ratioOf(a), 0);
         values[m] = list
-          .map((a) => formatAssignmentLine(projectById.get(a.projectId) as Project, a.statusId ? statusById.get(a.statusId)?.name : undefined, ratioOf(a)))
+          .map((a) => formatAssignmentLine(projectById.get(a.projectId) as Project, a.statusId ? statusById.get(a.statusId)?.name : undefined, ratioOf(a), hpm))
           .join("\n");
       }
       values.total = Math.round(total * 100) / 100;
@@ -198,51 +206,49 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
       row.height = Math.max(18, lines * 15 + 4);
     }
 
-    const revenueRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[0] };
-    const mmRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[1] };
-    let revTotal = 0;
+    const mmRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[0] };
+    const hRow: Record<string, string | number> = { member: TOTAL_ROW_LABELS[1] };
     let mmTotal = 0;
     for (const m of months) {
-      const list = yearAssignments.filter((a) => a.month === m);
-      const rev = list.reduce((s, a) => s + (projectById.get(a.projectId)?.unitPrice ?? 0) * ratioOf(a), 0);
-      const mm = list.reduce((s, a) => s + ratioOf(a), 0);
-      revenueRow[m] = Math.round(rev);
+      const mm = yearAssignments.filter((a) => a.month === m).reduce((s, a) => s + ratioOf(a), 0);
       mmRow[m] = Math.round(mm * 100) / 100;
-      revTotal += rev;
+      hRow[m] = ratioToHours(mm, hpm);
       mmTotal += mm;
     }
     mmRow.total = Math.round(mmTotal * 100) / 100;
-    const r1 = ws.addRow(revenueRow);
-    r1.numFmt = JPY;
-    r1.getCell("total").value = Math.round(revTotal);
-    const r2 = ws.addRow(mmRow);
-    r2.numFmt = "0.0#";
+    hRow.total = ratioToHours(mmTotal, hpm);
+    const r1 = ws.addRow(mmRow);
+    r1.numFmt = "0.0#";
+    const r2 = ws.addRow(hRow);
+    r2.numFmt = '#,##0.#"h"';
     for (const r of [r1, r2]) {
       styleTotalRow(r);
       r.alignment = { vertical: "middle", horizontal: "right" };
       r.getCell("member").alignment = { horizontal: "left" };
     }
     ws.getColumn("total").numFmt = "0.0#";
-    r1.getCell("total").numFmt = JPY;
+    r2.getCell("total").numFmt = '#,##0.#"h"';
     ws.getColumn("id").font = ID_FONT;
     styleHeader(ws.getRow(1));
     borderAll(ws);
   }
 
-  /* ---------- 売上サマリ ---------- */
+  /* ---------- 稼働サマリ（参照用: 案件 × 月の稼働時間） ---------- */
   {
-    const ws = wb.addWorksheet(SHEET_NAMES[3], { views: [{ state: "frozen", xSplit: 2, ySplit: 1 }] });
+    const HOURS = '#,##0.#"h"';
+    const ws = wb.addWorksheet(SHEET_NAMES[3], { views: [{ state: "frozen", xSplit: 3, ySplit: 1 }] });
     ws.columns = [
       { header: "コード", key: "code", width: 16 },
       { header: "案件名", key: "name", width: 28 },
-      ...months.map((m) => ({ header: m, key: m, width: 14, style: { numFmt: JPY } })),
-      { header: "合計", key: "total", width: 16, style: { numFmt: JPY } },
+      { header: "受注金額", key: "amount", width: 16, style: { numFmt: JPY } },
+      ...months.map((m) => ({ header: m, key: m, width: 11, style: { numFmt: HOURS } })),
+      { header: "合計(時間)", key: "total", width: 12, style: { numFmt: HOURS } },
+      { header: "合計(人月)", key: "mm", width: 11, style: { numFmt: "0.0#" } },
     ];
-    const rev = new Map<string, number>(); // `${projectId}|${month}`
+    const ratioSum = new Map<string, number>(); // `${projectId}|${month}` → Σratio
     for (const a of yearAssignments) {
-      const p = projectById.get(a.projectId)!;
       const k = `${a.projectId}|${a.month}`;
-      rev.set(k, (rev.get(k) ?? 0) + p.unitPrice * ratioOf(a));
+      ratioSum.set(k, (ratioSum.get(k) ?? 0) + ratioOf(a));
     }
     const first = months[0];
     const last = months[months.length - 1];
@@ -255,25 +261,37 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
           (p.startMonth <= first && p.endMonth >= last),
       )
       .sort((a, b) => a.code.localeCompare(b.code));
-    const colTotals = new Map<MonthKey, number>();
-    let grand = 0;
+    const colMM = new Map<MonthKey, number>();
+    let grandMM = 0;
+    let amountTotal = 0;
     for (const p of projects) {
-      const values: Record<string, string | number> = { code: p.code, name: p.name };
-      let total = 0;
+      const values: Record<string, string | number> = { code: p.code, name: p.name, amount: p.amount };
+      let mm = 0;
       for (const m of months) {
-        const v = Math.round(rev.get(`${p.id}|${m}`) ?? 0);
-        values[m] = v;
-        total += v;
-        colTotals.set(m, (colTotals.get(m) ?? 0) + v);
+        const v = ratioSum.get(`${p.id}|${m}`) ?? 0;
+        values[m] = ratioToHours(v, hpm);
+        mm += v;
+        colMM.set(m, (colMM.get(m) ?? 0) + v);
       }
-      values.total = total;
-      grand += total;
+      values.total = ratioToHours(mm, hpm);
+      values.mm = Math.round(mm * 100) / 100;
+      grandMM += mm;
+      amountTotal += p.amount;
       ws.addRow(values);
     }
-    const totalValues: Record<string, string | number> = { code: "合計", name: "", total: grand };
-    for (const m of months) totalValues[m] = colTotals.get(m) ?? 0;
-    const tr = ws.addRow(totalValues);
+    const hoursTotal: Record<string, string | number> = {
+      code: "合計(時間)", name: "", amount: amountTotal, total: ratioToHours(grandMM, hpm), mm: Math.round(grandMM * 100) / 100,
+    };
+    const mmTotal: Record<string, string | number> = { code: "合計(人月)", name: "", mm: Math.round(grandMM * 100) / 100 };
+    for (const m of months) {
+      hoursTotal[m] = ratioToHours(colMM.get(m) ?? 0, hpm);
+      mmTotal[m] = Math.round((colMM.get(m) ?? 0) * 100) / 100;
+    }
+    const tr = ws.addRow(hoursTotal);
+    const tm = ws.addRow(mmTotal);
+    for (const m of months) tm.getCell(m).numFmt = "0.0#";
     styleTotalRow(tr);
+    styleTotalRow(tm);
     ws.getColumn("total").font = { bold: true };
     styleHeader(ws.getRow(1));
     borderAll(ws);
@@ -286,7 +304,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
       { key: "topic", width: 14 },
       { key: "text", width: 110 },
     ];
-    for (const [topic, text] of HELP_ROWS) {
+    for (const [topic, text] of helpRows(hpm)) {
       const row = ws.addRow({ topic, text });
       row.alignment = { vertical: "top", wrapText: true };
       if (topic) row.getCell("topic").font = { bold: true };

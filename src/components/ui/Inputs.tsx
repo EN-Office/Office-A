@@ -25,6 +25,7 @@ export interface NumberInputProps {
   onChange: (v: number) => void;
   currency?: boolean;
   min?: number;
+  max?: number;
   step?: number;
   suffix?: string;
   className?: string;
@@ -33,8 +34,9 @@ export interface NumberInputProps {
 }
 
 const fmt = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
+const fmt1 = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 1 });
 
-export function NumberInput({ value, onChange, currency, min, suffix, className = "", ...rest }: NumberInputProps) {
+export function NumberInput({ value, onChange, currency, min, max, step: _step, suffix, className = "", ...rest }: NumberInputProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   const cancelled = useRef(false);
@@ -45,7 +47,8 @@ export function NumberInput({ value, onChange, currency, min, suffix, className 
     if (cancelled.current) { cancelled.current = false; return; }
     const n = Number(draft.replace(/[^\d.-]/g, ""));
     if (!Number.isFinite(n)) return setDraft(String(value));
-    const v = min != null ? Math.max(min, n) : n;
+    let v = min != null ? Math.max(min, n) : n;
+    if (max != null) v = Math.min(max, v);
     if (v !== value) onChange(v);
   };
 
@@ -54,8 +57,8 @@ export function NumberInput({ value, onChange, currency, min, suffix, className 
       {currency && <span className="ui-field__prefix num">¥</span>}
       <input
         className="ui-input num"
-        inputMode="numeric"
-        value={editing ? draft : fmt.format(value)}
+        inputMode={currency ? "numeric" : "decimal"}
+        value={editing ? draft : (currency ? fmt : fmt1).format(value)}
         onFocus={(e) => { cancelled.current = false; setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}

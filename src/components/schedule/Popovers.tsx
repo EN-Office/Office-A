@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import type { Assignment, DB, MonthKey, Project } from "@shared/types";
 import { isWithin } from "@shared/types";
-import { fmtRatio, projectActiveIn, r2 } from "./helpers";
+import { clampHours, hoursPerMonthOf, hoursRange, hoursToRatio, ratioToHours } from "../../lib/store";
+import { fmtHours, fmtManMonth, projectActiveIn } from "./helpers";
 
 export interface Anchor { left: number; top: number; right: number; bottom: number }
 
@@ -38,7 +39,53 @@ function useFloating(anchor: Anchor, width: number, estH: number, onClose: () =>
   return { ref, pos };
 }
 
-const QUICK = [0.25, 0.5, 0.75, 1];
+/** クイック工数（1人月に対する割合）。0.5 / 1 人月を主ボタン、0.25 / 0.75 を補助ボタンにする */
+const QUICK_MAIN = [0.5, 1];
+const QUICK_SUB = [0.25, 0.75];
+
+/**
+ * 工数（時間）入力。入力のたびに有効な値ならコミットし（ポップオーバーを外クリックで閉じても失われない）、
+ * Enter / blur で範囲内に丸めて表示を確定する。
+ */
+function HoursInput({ id, value, min, max, onCommit }: { id: string; value: number; min: number; max: number; onCommit: (h: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(String(value)); }, [value, editing]);
+  const parse = (s: string) => {
+    const n = Number(s.normalize("NFKC").replace(/[^\d.]/g, ""));
+    return s.trim() !== "" && Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const finish = () => {
+    setEditing(false);
+    const n = parse(draft);
+    if (n != null) onCommit(Math.min(max, Math.max(min, n)));
+    else setDraft(String(value));
+  };
+  return (
+    <label className="sch-hours ui-field ui-field--num">
+      <input
+        id={id}
+        className="ui-input num"
+        type="number"
+        inputMode="decimal"
+        min={min}
+        max={max}
+        step={10}
+        value={editing ? draft : String(value)}
+        aria-label="工数 (h)"
+        onFocus={(e) => { setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const n = parse(e.target.value);
+          if (n != null && n >= min && n <= max) onCommit(n);
+        }}
+        onBlur={finish}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      />
+      <span className="ui-field__suffix">h</span>
+    </label>
+  );
+}
 
 interface PopProps {
   anchor: Anchor;
@@ -61,6 +108,25 @@ export function AssignmentPopover({ anchor, assignment: a, db, months, onClose, 
   const maxN = Math.max(0, months.length - 1 - idx);
   const nn = Math.min(n, Math.max(1, maxN));
   const inPeriod = months.filter((m) => isWithin(m, project.startMonth, project.endMonth));
+  const hpm = hoursPerMonthOf(db);
+  const hours = ratioToHours(a.ratio, hpm);
+  const { min: hMin, max: hMax } = hoursRange(hpm);
+  const setHours = (h: number) => update(a.id, { ratio: hoursToRatio(clampHours(h, hpm), hpm) });
+  const quickBtn = (q: number, main: boolean) => {
+    const h = ratioToHours(q, hpm);
+    return (
+      <button
+        key={q}
+        type="button"
+        className={`${main ? "sch-quick-main" : "sch-quick-sub"} ${hours === h ? "is-on" : ""}`}
+        data-hours={h}
+        onClick={() => setHours(h)}
+      >
+        <b className="sch-mono">{fmtHours(h)}</b>
+        {main && <small>{fmtManMonth(q)}</small>}
+      </button>
+    );
+  };
 
   return createPortal(
     <motion.div
@@ -82,25 +148,13 @@ export function AssignmentPopover({ anchor, assignment: a, db, months, onClose, 
         {member?.name} · <span className="sch-mono">{a.month}</span>
       </div>
 
-      <label className="sch-pop-label">
-        稼働率 <b className="sch-mono">{fmtRatio(a.ratio)}</b>
+      <label className="sch-pop-label" htmlFor={`sch-hours-${a.id}`}>
+        工数 (h) <span className="sch-mono sch-pop-derived">= {fmtManMonth(a.ratio)}</span>
       </label>
-      <input
-        className="sch-range"
-        type="range"
-        min={0.1}
-        max={1}
-        step={0.1}
-        value={a.ratio}
-        onChange={(e) => update(a.id, { ratio: r2(parseFloat(e.target.value)) })}
-      />
-      <div className="sch-quick">
-        {QUICK.map((q) => (
-          <button key={q} className={a.ratio === q ? "is-on" : ""} onClick={() => update(a.id, { ratio: q })}>
-            {q}
-          </button>
-        ))}
-      </div>
+      <HoursInput id={`sch-hours-${a.id}`} value={hours} min={hMin} max={hMax} onCommit={setHours} />
+      <div className="sch-quick">{QUICK_MAIN.map((q) => quickBtn(q, true))}</div>
+      <div className="sch-quick sch-quick--sub">{QUICK_SUB.map((q) => quickBtn(q, false))}</div>
+      <p className="sch-pop-note">{hpm}h = 1人月 · 上限 {hMax}h（残業込み）</p>
 
       <label className="sch-pop-label">役割</label>
       <select

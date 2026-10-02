@@ -1,10 +1,11 @@
 import { forwardRef } from "react";
 import type { Project, RoleStatus } from "@shared/types";
-import { fmtRatio } from "./helpers";
+import { fmtHours } from "./helpers";
 
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
   project: Project;
-  ratio?: number;
+  /** 工数（時間）。常に「80h」のように表示 */
+  hours: number;
   status?: RoleStatus;
   outOfRange?: boolean;
   floating?: boolean;
@@ -14,7 +15,7 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
 
 /** チップの見た目（ドラッグ・オーバーレイ兼用） */
 export const ChipBody = forwardRef<HTMLDivElement, Props>(function ChipBody(
-  { project, ratio = 1, status, outOfRange, floating, ghost, handle, className = "", ...rest },
+  { project, hours, status, outOfRange, floating, ghost, handle, className = "", ...rest },
   ref,
 ) {
   const cls = ["sch-chip", outOfRange && "is-out", floating && "is-floating", ghost && "is-ghost", className]
@@ -25,7 +26,7 @@ export const ChipBody = forwardRef<HTMLDivElement, Props>(function ChipBody(
       <span className="sch-chip-bar" style={{ background: project.color }} />
       <span className="sch-chip-code">{project.code}</span>
       <span className="sch-chip-name">{project.name}</span>
-      {ratio !== 1 && <span className="sch-chip-ratio">{fmtRatio(ratio)}</span>}
+      <span className="sch-chip-hours">{fmtHours(hours)}</span>
       {status && (
         <span className="sch-chip-status" style={{ ["--st" as string]: status.color }}>
           {status.name}

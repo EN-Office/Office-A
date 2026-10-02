@@ -10,6 +10,16 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** 旧形式（unitPrice = 1人月単価）の案件を受注金額 amount へ移行する。値はそのまま引き継ぐ */
+function migrateProject(p: Record<string, unknown>): DB["projects"][number] {
+  if (!isObject(p)) return p as unknown as DB["projects"][number];
+  const { unitPrice, ...rest } = p;
+  const amount = typeof rest.amount === "number" && Number.isFinite(rest.amount)
+    ? rest.amount
+    : typeof unitPrice === "number" && Number.isFinite(unitPrice) ? unitPrice : 0;
+  return { ...rest, amount } as unknown as DB["projects"][number];
+}
+
 /**
  * 最低限の形チェック。欠けている配列/設定は既定値で補う。
  * 形として DB と見なせない（オブジェクトでない・配列キーが配列以外）場合は null。
@@ -21,15 +31,19 @@ export function normalizeDB(input: unknown): DB | null {
     if (input[k] !== undefined && !Array.isArray(input[k])) return null;
   }
   if (input.settings !== undefined && !isObject(input.settings)) return null;
+  const settings = { ...base.settings, ...((input.settings as Partial<DB["settings"]> | undefined) ?? {}) };
+  if (typeof settings.hoursPerMonth !== "number" || !Number.isFinite(settings.hoursPerMonth) || settings.hoursPerMonth <= 0) {
+    settings.hoursPerMonth = base.settings.hoursPerMonth;
+  }
   const version = typeof input.version === "number" && Number.isFinite(input.version) ? input.version : base.version;
   return {
     version,
     roles: (input.roles as DB["roles"] | undefined) ?? base.roles,
     members: (input.members as DB["members"] | undefined) ?? [],
     roleStatuses: (input.roleStatuses as DB["roleStatuses"] | undefined) ?? base.roleStatuses,
-    projects: (input.projects as DB["projects"] | undefined) ?? [],
+    projects: ((input.projects as Array<Record<string, unknown>> | undefined) ?? []).map(migrateProject),
     assignments: (input.assignments as DB["assignments"] | undefined) ?? [],
-    settings: { ...base.settings, ...((input.settings as Partial<DB["settings"]> | undefined) ?? {}) },
+    settings,
   };
 }
 

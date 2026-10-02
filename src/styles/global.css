@@ -59,13 +59,13 @@ table { border-collapse: collapse; }
   letter-spacing: -0.01em;
   line-height: 1.1;
 }
-/* 強調はイタリックではなくウェイト + 色で（メイリオに真のイタリックは無い） */
+/* 強調はイタリックではなくウェイト + 色で（メイリオに真のイタリックは無く、Open Sans もイタリックは読み込まない） */
 .display em, .display i { font-style: normal; font-weight: 700; }
-.h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(52px, 6.4vw, 96px); line-height: 1.08; letter-spacing: -0.03em; }
+.h1 { margin: 0; font-family: var(--font-display); font-weight: var(--h1-weight); font-size: var(--h1-size); line-height: 1.2; letter-spacing: -0.01em; }
 .h2 { font-family: var(--font-display); font-weight: 400; font-size: 36px; line-height: 1.15; letter-spacing: -0.015em; }
 .h3 { font-family: var(--font-display); font-weight: 400; font-size: 24px; line-height: 1.2; letter-spacing: -0.01em; }
-.h1 em, .h2 em, .h3 em { font-style: normal; font-weight: 700; color: var(--accent); }
-.h1 em { font-size: 0.62em; letter-spacing: -0.02em; margin-left: 0.15em; }
+.h1 em, .h2 em, .h3 em { font-style: normal; font-weight: 700; color: inherit; }
+.h1 em { font-size: 0.64em; font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-left: 0.3em; }
 .eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -79,7 +79,7 @@ table { border-collapse: collapse; }
 
 /* ---------- layout primitives ---------- */
 .page {
-  padding: var(--space-8) var(--space-8) var(--space-9);
+  padding: var(--space-6) var(--space-8) var(--space-9);
   max-width: 1440px;
 }
 .page-head {
@@ -87,13 +87,13 @@ table { border-collapse: collapse; }
   grid-template-columns: 1fr auto;
   align-items: end;
   gap: var(--space-6);
-  padding-bottom: var(--space-6);
-  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
   border-bottom: 1px solid var(--line-strong);
 }
 .page-head__meta {
   display: flex; flex-wrap: wrap; gap: var(--space-5);
-  margin-top: var(--space-4);
+  margin-top: var(--space-2);
   color: var(--ink-2);
 }
 .page-head__meta b { font-weight: 500; color: var(--ink); }

@@ -1,11 +1,16 @@
 /* ===== Office-A Design Tokens =====
    トーン: 編集室のレイアウトテーブル。紙 × インク × 1アクセント。 */
 :root {
-  /* フォントはメイリオに統一（Windows 標準）。未搭載環境は Meiryo UI → 游ゴシック → システムの順でフォールバック */
-  --font-meiryo: "Meiryo", "メイリオ", "Meiryo UI", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
+  /* 英数字は Open Sans（@fontsource で同梱・ローカル配信）、日本語はメイリオ。
+     Open Sans は和文グリフを持たないため、ブラウザは英数字を Open Sans、和文を Meiryo から取る。
+     Meiryo 未搭載環境は Meiryo UI → 游ゴシック → システムの順でフォールバック */
+  --font-meiryo: "Open Sans", "Meiryo", "メイリオ", "Meiryo UI", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
   --font-display: var(--font-meiryo);
   --font-body: var(--font-meiryo);
   --font-mono: var(--font-meiryo);
+  /* ページ見出し（h1）は全画面共通。サイドバーの「Office‑A」ロゴと同程度の大きさ */
+  --h1-size: 28px;
+  --h1-weight: 700;
 
   --paper: #f6f4ef;
   --paper-2: #efece4;
