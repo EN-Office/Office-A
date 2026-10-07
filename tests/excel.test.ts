@@ -32,7 +32,7 @@ describe("exportWorkbook", () => {
     expect(rowValues(projects, 1)).toEqual(["ID", "案件コード", "案件名", "受注金額", "開始", "終了", "必要役割", "色", "備考"]);
     expect(rowValues(projects, 2)).toEqual([
       "p01", "PRJ-2026-001", "基幹業務システム刷新", 48_000_000, "2026-04", "2026-09",
-      "PM×1, PL×1, 開発メンバー×3", "#e07a5f", "大手製造業向け。上期で本番切替。",
+      "PM×1 (3人月), PL×1 (6人月), 開発メンバー×3 (15人月)", "#e07a5f", "大手製造業向け。上期で本番切替。",
     ]);
 
     const asg = wb.getWorksheet("アサイン")!;
@@ -65,6 +65,8 @@ describe("exportWorkbook", () => {
     expect(helpText).toContain("案件コード [役割名] 工数h");
     expect(helpText).toContain("1人月 = 160h");
     expect(helpText).toContain("ID");
+    expect(helpText).toContain("PM×1 (2.5人月)");
+    expect(helpText).toContain("人数 × 案件の月数");
 
     const sum = wb.getWorksheet("稼働サマリ")!;
     const sumHead = Array.from({ length: sum.getRow(1).cellCount }, (_, i) => sum.getRow(1).getCell(i + 1).value);

@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { compareMonth, isWithin, parseMonth, type ID, type MonthKey, type Project, type RoleStatus } from "@shared/types";
-import { contractTotal, formatJPY, selectFiscalMonths, selectProjectFulfilment, useStore } from "@/lib/store";
+import {
+  contractTotal, defaultManMonths, fmtMM, formatJPY, manMonthFulfilment, MIN_MAN_MONTHS, roundManMonths, selectFiscalMonths,
+  selectProjectFulfilment, selectProjectManMonths, useStore,
+} from "@/lib/store";
 import {
   Button, Chip, ColorSwatches, ConfirmPopover, Drawer, Icon, IconButton, MonthInput, NumberInput, PALETTE, Stepper, TextInput,
 } from "@/components/ui";
@@ -24,6 +27,7 @@ export default function ProjectsView() {
 
   const months = useMemo(() => selectFiscalMonths(db, fy), [db, fy]);
   const fulfil = useMemo(() => selectProjectFulfilment(db, months), [db, months]);
+  const assignedMM = useMemo(() => selectProjectManMonths(db), [db]);
   const statusMap = useMemo(() => new Map(db.roleStatuses.map((s) => [s.id, s])), [db.roleStatuses]);
   const memberCount = useMemo(() => {
     const set = new Set(months);
@@ -150,6 +154,7 @@ export default function ProjectsView() {
                   months={months}
                   statusMap={statusMap}
                   fulfil={fulfil.get(p.id)}
+                  assignedMM={assignedMM.get(p.id) ?? EMPTY_MM}
                   members={memberCount.get(p.id)?.size ?? 0}
                   onOpen={() => setOpenId(p.id)}
                 />
@@ -166,27 +171,36 @@ export default function ProjectsView() {
 
 /* ================= Card ================= */
 
-function fulfilment(p: Project, f: Map<ID | "", number> | undefined) {
-  let need = 0;
-  let got = 0;
-  for (const r of p.required) {
-    need += r.count;
-    got += Math.min(r.count, f?.get(r.statusId) ?? 0);
-  }
-  return { need, got, ratio: need ? got / need : 0 };
+const EMPTY_MM = new Map<ID | "", number>();
+
+/** 必要人月に対するアサイン人月のメーター（不足は赤） */
+function MMMeter({ got, need }: { got: number; need: number }) {
+  const short = got + 1e-9 < need;
+  return (
+    <span className={`pj-mm ${short ? "is-short" : "is-met"}`} title={short ? `${fmtMM(need - got)}人月 不足` : "充足"}>
+      <span className="pj-mm__bar"><i style={{ width: `${need > 0 ? Math.min(1, got / need) * 100 : 100}%` }} /></span>
+      <span className="pj-mm__txt num">{fmtMM(got)} / {fmtMM(need)}人月</span>
+    </span>
+  );
 }
 
-function ProjectCard({ project: p, months, statusMap, fulfil: f, members, onOpen, index }: {
+function ProjectCard({ project: p, months, statusMap, fulfil: f, assignedMM, members, onOpen, index }: {
   project: Project;
   months: MonthKey[];
   statusMap: Map<ID, RoleStatus>;
   fulfil?: Map<ID | "", number>;
+  /** statusId → 案件全期間のアサイン人月 */
+  assignedMM: Map<ID | "", number>;
   members: number;
   onOpen: () => void;
   index: number;
 }) {
-  const { need, got, ratio } = fulfilment(p, f);
-  const state = !need ? "none" : got >= need ? "ok" : got > 0 ? "part" : "empty";
+  // リングは人月充足率（Σ min(アサイン人月, 必要人月) / Σ 必要人月）
+  const mmf = manMonthFulfilment(p, assignedMM);
+  const need = mmf?.need ?? 0;
+  const got = mmf?.got ?? 0;
+  const ratio = mmf?.ratio ?? 0;
+  const state = !mmf ? "none" : ratio >= 1 - 1e-9 ? "ok" : got > 0 ? "part" : "empty";
   const s = parseMonth(p.startMonth);
   const e = parseMonth(p.endMonth);
 
@@ -240,26 +254,34 @@ function ProjectCard({ project: p, months, statusMap, fulfil: f, members, onOpen
             const st = statusMap.get(r.statusId);
             if (!st) return null;
             const have = f?.get(r.statusId) ?? 0;
+            const mm = assignedMM.get(r.statusId) ?? 0;
+            const met = have >= r.count && mm + 1e-9 >= r.manMonths;
             return (
-              <Chip key={r.statusId} color={st.color} count={`${have}/${r.count}`} className={have >= r.count ? "is-met" : ""}>
+              <Chip
+                key={r.statusId}
+                color={st.color}
+                count={`${have}/${r.count} · ${fmtMM(r.manMonths)}人月`}
+                className={met ? "is-met" : ""}
+                title={`${st.name}: アサイン ${have}/${r.count} 名 · ${fmtMM(mm)} / ${fmtMM(r.manMonths)}人月`}
+              >
                 {st.name}
               </Chip>
             );
           })}
         </div>
-        <div className={`pj-fill pj-fill--${state}`} title={need ? `充足 ${got}/${need}` : `アサイン ${members}名`}>
+        <div className={`pj-fill pj-fill--${state}`} title={mmf ? `人月充足 ${fmtMM(got)} / ${fmtMM(need)}人月` : `アサイン ${members}名`}>
           <svg viewBox="0 0 36 36" className="pj-fill__ring" aria-hidden>
             <circle cx="18" cy="18" r="15" className="pj-fill__track" />
             <motion.circle
               cx="18" cy="18" r="15"
               className="pj-fill__arc"
               initial={false}
-              animate={{ pathLength: need ? ratio : 0 }}
+              animate={{ pathLength: mmf ? ratio : 0 }}
               transition={{ duration: 0.5, ease }}
             />
           </svg>
-          <span className="pj-fill__txt num">{need ? `${Math.round(ratio * 100)}` : members}</span>
-          <span className="pj-fill__lbl">{need ? "充足%" : "名"}</span>
+          <span className="pj-fill__txt num">{mmf ? `${Math.floor(ratio * 100)}` : members}</span>
+          <span className="pj-fill__lbl">{mmf ? "人月%" : "名"}</span>
         </div>
       </div>
     </motion.article>
@@ -274,8 +296,16 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
   const statuses = useStore((s) => s.db.roleStatuses);
   const sortedStatuses = useMemo(() => [...statuses].sort((a, b) => a.order - b.order), [statuses]);
   const statusMap = useMemo(() => new Map(statuses.map((s) => [s.id, s])), [statuses]);
+  const assignments = useStore((s) => s.db.assignments);
 
   const p = project;
+  // 役割ごとのアサイン人月（案件の全期間）
+  const assignedMM = useMemo(() => {
+    const m = new Map<ID | "", number>();
+    if (!p) return m;
+    for (const a of assignments) if (a.projectId === p.id) m.set(a.statusId ?? "", (m.get(a.statusId ?? "") ?? 0) + a.ratio);
+    return m;
+  }, [assignments, p]);
   const up = (patch: Partial<Omit<Project, "id">>) => p && updateProject(p.id, patch);
   const invalidRange = p ? compareMonth(p.endMonth, p.startMonth) < 0 : false;
   const durationMonths = p ? (() => {
@@ -286,7 +316,11 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
   const setCount = (statusId: ID, count: number) =>
     p && up({ required: p.required.map((r) => (r.statusId === statusId ? { ...r, count } : r)) });
   const removeReq = (statusId: ID) => p && up({ required: p.required.filter((r) => r.statusId !== statusId) });
-  const addReq = (statusId: ID) => p && up({ required: [...p.required, { statusId, count: 1 }] });
+  const setManMonths = (statusId: ID, manMonths: number) =>
+    p && up({ required: p.required.map((r) => (r.statusId === statusId ? { ...r, manMonths: roundManMonths(manMonths) } : r)) });
+  const addReq = (statusId: ID) => p && up({ required: [...p.required, { statusId, count: 1, manMonths: defaultManMonths(1, p) }] });
+  const totalMM = p ? p.required.reduce((s, r) => s + r.manMonths, 0) : 0;
+  const totalGot = p ? p.required.reduce((s, r) => s + (assignedMM.get(r.statusId) ?? 0), 0) : 0;
 
   const available = p ? sortedStatuses.filter((s) => !p.required.some((r) => r.statusId === s.id)) : [];
 
@@ -349,7 +383,9 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
           <section className="pj-req">
             <div className="pj-req__head">
               <span className="eyebrow">必要役割</span>
-              <span className="num muted small">計 {p.required.reduce((s, r) => s + r.count, 0)} 名</span>
+              <span className="num muted small">
+                計 {p.required.reduce((s, r) => s + r.count, 0)} 名 · アサイン {fmtMM(totalGot)} / 必要 {fmtMM(totalMM)}人月
+              </span>
             </div>
             <ul className="pj-req__list">
               <AnimatePresence initial={false}>
@@ -368,9 +404,24 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
                     >
                       <span className="pj-req__inner">
                         <span className="dot" style={{ color: st.color }} />
-                        <span className="grow">{st.name}</span>
+                        <span className="grow pj-req__name">{st.name}</span>
+                        <span className="pj-req__lbl">人数</span>
                         <Stepper value={r.count} min={1} onChange={(c) => setCount(r.statusId, c)} label={`${st.name} 人数`} />
+                        <span className="pj-req__lbl">必要人月</span>
+                        <NumberInput
+                          className="pj-req__mmin"
+                          value={r.manMonths}
+                          min={MIN_MAN_MONTHS}
+                          step={0.01}
+                          decimals={2}
+                          suffix="人月"
+                          onChange={(v) => setManMonths(r.statusId, v)}
+                          aria-label={`${st.name} 必要人月`}
+                        />
                         <IconButton icon="close" label={`${st.name} を外す`} size="sm" variant="danger" onClick={() => removeReq(r.statusId)} />
+                      </span>
+                      <span className="pj-req__fill">
+                        <MMMeter got={assignedMM.get(r.statusId) ?? 0} need={r.manMonths} />
                       </span>
                     </motion.li>
                   );

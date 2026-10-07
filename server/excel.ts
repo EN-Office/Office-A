@@ -9,7 +9,9 @@ import {
   type Assignment,
   type DB,
   type MonthKey,
+  roundManMonths,
   type Project,
+  type RequiredRole,
 } from "../shared/types";
 
 const JPY = "¥#,##0";
@@ -34,6 +36,14 @@ export function formatAssignmentLine(project: Pick<Project, "code">, statusName:
   return s;
 }
 
+/**
+ * 必要役割 1 件分: `<役割名>×<人数> (<必要人月>人月)`（人月は小数 2 桁まで、末尾の 0 は省略）。
+ * 取り込み側は `(N人月)` を省略した旧形式も受け付ける
+ */
+export function formatRequiredRole(statusName: string, r: Pick<RequiredRole, "count" | "manMonths">): string {
+  return `${statusName}×${r.count} (${roundManMonths(r.manMonths)}人月)`;
+}
+
 function helpRows(hpm: number): Array<[string, string]> {
   return [
     ["Office-A Excel 取り込みルール", ""],
@@ -53,7 +63,8 @@ function helpRows(hpm: number): Array<[string, string]> {
     ["", ""],
     ["案件", "編集可能: 案件コード / 案件名 / 受注金額 / 開始 / 終了 / 必要役割 / 色 / 備考。"],
     ["", "開始・終了は YYYY-MM 形式（例: 2026-04）。受注金額は案件全体の契約額（円、数値）で、入力値をそのまま保持します（稼働とは掛け合わせません）。"],
-    ["", "必要役割は「PM×1, PL×1, 開発メンバー×3」の形式。未登録の役割名は新しい役割として追加されます。"],
+    ["", "必要役割は「PM×1 (2.5人月), PL×1 (1人月), 開発メンバー×3 (12人月)」の形式（役割名×人数 (必要人月)）。必要人月は案件期間全体で必要な工数の合計で、0.01 以上・小数 2 桁まで。"],
+    ["", "「(N人月)」を省略した場合（旧形式「PM×1」など）は 人数 × 案件の月数 を必要人月とします。未登録の役割名は新しい役割として追加されます。"],
     ["", "色は #RRGGBB 形式（例: #e07a5f）。空欄の場合は自動で割り当てます。"],
     ["", ""],
     ["アサイン", "この年度の 12 ヶ月分のアサインを、シートの内容で置き換えます（ほかの年度のアサインは変更されません）。"],
@@ -143,7 +154,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
       { header: "受注金額", key: "amount", width: 16, style: { numFmt: JPY } },
       { header: "開始", key: "start", width: 10, style: { numFmt: "@" } },
       { header: "終了", key: "end", width: 10, style: { numFmt: "@" } },
-      { header: "必要役割", key: "required", width: 36 },
+      { header: "必要役割", key: "required", width: 48 },
       { header: "色", key: "color", width: 10 },
       { header: "備考", key: "note", width: 30 },
     ];
@@ -156,7 +167,7 @@ export async function exportWorkbook(db: DB, fiscalYear: number): Promise<Buffer
         start: p.startMonth,
         end: p.endMonth,
         required: (p.required ?? [])
-          .map((r) => `${statusById.get(r.statusId)?.name ?? r.statusId}×${r.count}`)
+          .map((r) => formatRequiredRole(statusById.get(r.statusId)?.name ?? r.statusId, r))
           .join(", "),
         color: p.color,
         note: p.note ?? "",

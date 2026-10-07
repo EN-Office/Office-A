@@ -34,6 +34,11 @@ export interface RoleStatus {
 export interface RequiredRole {
   statusId: ID;
   count: number;
+  /**
+   * この役割の必要工数（人月）。案件期間全体の合計。0.01 以上、小数 2 桁。
+   * 旧データにない場合は count × 案件の月数（計算できなければ 1）で補う
+   */
+  manMonths: number;
 }
 
 export interface Project {
@@ -101,6 +106,48 @@ export function ratioToHours(ratio: number, hpm: number): number {
 /** 時間 → ratio（人月）。丸めずにそのまま保持する */
 export function hoursToRatio(hours: number, hpm: number): number {
   return hours / hpm;
+}
+
+/** 必要人月の最小値 */
+export const MIN_MAN_MONTHS = 0.01;
+
+/** 必要人月を小数 2 桁に丸め、0.01 以上にする */
+export function roundManMonths(n: number): number {
+  const v = Math.round(n * 100) / 100;
+  return v >= MIN_MAN_MONTHS ? v : MIN_MAN_MONTHS;
+}
+
+/** 案件期間の月数（開始・終了を含む）。期間が読めない・逆転しているときは null */
+export function projectMonthCount(p: { startMonth?: unknown; endMonth?: unknown }): number | null {
+  const re = /^\d{4}-\d{2}$/;
+  if (typeof p.startMonth !== "string" || typeof p.endMonth !== "string" || !re.test(p.startMonth) || !re.test(p.endMonth)) return null;
+  const a = parseMonth(p.startMonth);
+  const b = parseMonth(p.endMonth);
+  const n = b.year * 12 + b.month - (a.year * 12 + a.month) + 1;
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+/** 必要人月の既定値: 人数 × 案件の月数（月数が計算できなければ 1） */
+export function defaultManMonths(count: number, p: { startMonth?: unknown; endMonth?: unknown }): number {
+  const n = projectMonthCount(p);
+  const c = Number.isFinite(count) && count > 0 ? count : 1;
+  return n === null ? 1 : roundManMonths(c * n);
+}
+
+/**
+ * 案件の人月充足率 = Σ min(アサイン人月, 必要人月) / Σ 必要人月（役割ごとに上限を付けるので 100% 以下。
+ * ある役割の超過で別の役割の不足を打ち消さない）。assigned は statusId → 案件全期間の Σratio。
+ * 必要役割がなければ null
+ */
+export function manMonthFulfilment(p: Pick<Project, "required">, assigned: Map<ID | "", number>): { need: number; got: number; ratio: number } | null {
+  let need = 0;
+  let got = 0;
+  for (const r of p.required) {
+    need += r.manMonths;
+    got += Math.min(r.manMonths, assigned.get(r.statusId) ?? 0);
+  }
+  if (!p.required.length || need <= 0) return null;
+  return { need, got, ratio: Math.min(1, got / need) };
 }
 
 /** 1アサインあたりの許容工数（時間）: 1h 〜 2 × 1人月時間（残業込み） */

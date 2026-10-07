@@ -13,8 +13,8 @@ import {
 } from "@dnd-kit/core";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Assignment, MonthKey, Project } from "@shared/types";
-import { fiscalMonths, flattenTree, isWithin } from "@shared/types";
-import { contractTotal, hoursPerMonthOf, ratioToHours, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
+import { fiscalMonths, flattenTree, isWithin, projectMonthCount } from "@shared/types";
+import { contractTotal, fmtMM, hoursPerMonthOf, ratioToHours, selectProjectManMonths, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
 import { ChipBody } from "../components/schedule/Chip";
 import { AssignmentPopover, QuickPicker, rectOf, type Anchor } from "../components/schedule/Popovers";
 import {
@@ -144,28 +144,116 @@ const Cell = memo(function Cell({
 
 /* ---------- パレット ---------- */
 
-function PaletteChip({ p, months }: { p: Project; months: MonthKey[] }) {
+interface PaletteChipProps {
+  p: Project;
+  months: MonthKey[];
+  open: boolean;
+  onToggle: (id: string) => void;
+  /** statusId → 案件全期間のアサイン人月 */
+  assigned: Map<string, number> | undefined;
+  statusMap: ReturnType<typeof selectStatusMap>;
+}
+
+function PaletteChip({ p, months, open, onToggle, assigned, statusMap }: PaletteChipProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `p:${p.id}`,
     data: { type: "palette", projectId: p.id },
   });
+  const detailId = `sch-pal-detail-${p.id}`;
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={`sch-pal-item ${isDragging ? "is-ghost" : ""}`}>
-      <span className="sch-pal-bar" style={{ background: p.color }} />
-      <div className="sch-pal-main">
-        <div className="sch-pal-top">
-          <span className="sch-mono sch-pal-code">{p.code}</span>
-          <span className="sch-mono sch-pal-price" title="受注金額">{fmtYen(p.amount)}</span>
+    <div className={`sch-pal-entry ${open ? "is-open" : ""}`}>
+      <div ref={setNodeRef} {...attributes} {...listeners} className={`sch-pal-item ${isDragging ? "is-ghost" : ""}`}>
+        <span className="sch-pal-bar" style={{ background: p.color }} />
+        <div className="sch-pal-main">
+          <div className="sch-pal-top">
+            <span className="sch-mono sch-pal-code">{p.code}</span>
+            <span className="sch-mono sch-pal-price" title="受注金額">{fmtYen(p.amount)}</span>
+          </div>
+          {/* 名前だけがクリック対象（詳細の開閉）。ポインタダウンを止めてドラッグ開始と分離する */}
+          <button
+            type="button"
+            className="sch-pal-name"
+            aria-expanded={open}
+            aria-controls={detailId}
+            title={open ? "詳細を閉じる" : "詳細を表示"}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle(p.id);
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // キーボード（Enter/Space）は onKeyDown で処理済み。detail=0 はキー由来のクリック
+              if (e.detail !== 0) onToggle(p.id);
+            }}
+          >
+            <span className="sch-pal-name-text">{p.name}</span>
+            <motion.span
+              className="sch-pal-chev"
+              aria-hidden
+              animate={{ rotate: open ? 180 : 0 }}
+              transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            >
+              ▾
+            </motion.span>
+          </button>
+          <div className="sch-pal-period" title={`${p.startMonth} 〜 ${p.endMonth}`}>
+            {months.map((m) => (
+              <i key={m} className={isWithin(m, p.startMonth, p.endMonth) ? "on" : ""} style={isWithin(m, p.startMonth, p.endMonth) ? { background: p.color } : undefined} />
+            ))}
+          </div>
+          <div className="sch-mono sch-pal-range">{p.startMonth} → {p.endMonth}</div>
         </div>
-        <div className="sch-pal-name">{p.name}</div>
-        <div className="sch-pal-period" title={`${p.startMonth} 〜 ${p.endMonth}`}>
-          {months.map((m) => (
-            <i key={m} className={isWithin(m, p.startMonth, p.endMonth) ? "on" : ""} style={isWithin(m, p.startMonth, p.endMonth) ? { background: p.color } : undefined} />
-          ))}
-        </div>
-        <div className="sch-mono sch-pal-range">{p.startMonth} → {p.endMonth}</div>
+        <span className="sch-grip" aria-hidden>⠿</span>
       </div>
-      <span className="sch-grip" aria-hidden>⠿</span>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            id={detailId}
+            key="detail"
+            className="sch-pal-detail"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            <div className="sch-pal-detail-in">
+              <dl className="sch-pal-facts">
+                <div><dt>受注金額</dt><dd className="sch-mono">{fmtYen(p.amount)}</dd></div>
+                <div><dt>期間</dt><dd className="sch-mono">{p.startMonth} → {p.endMonth}<small>{projectMonthCount(p) ?? "—"}ヶ月</small></dd></div>
+              </dl>
+              {p.required.length === 0 ? (
+                <div className="sch-pal-noreq">必要役割 未設定</div>
+              ) : (
+                <ul className="sch-pal-roles">
+                  {p.required.map((r) => {
+                    const st = statusMap.get(r.statusId);
+                    const got = assigned?.get(r.statusId) ?? 0;
+                    const short = got + 1e-9 < r.manMonths;
+                    return (
+                      <li key={r.statusId} className={short ? "is-short" : "is-met"}>
+                        <span className="sch-pal-role-n">
+                          <i style={{ background: st?.color ?? "var(--ink-3)" }} />
+                          <span>{st?.name ?? "?"}</span>
+                          <span className="sch-mono sch-pal-role-c">{r.count}名</span>
+                        </span>
+                        <span className="sch-mono sch-pal-role-v" title={short ? `${fmtMM(r.manMonths - got)}人月 不足` : "充足"}>
+                          {fmtMM(got)} / {fmtMM(r.manMonths)}<small>人月</small>
+                        </span>
+                        <span className="sch-pal-meter"><i style={{ width: `${r.manMonths > 0 ? Math.min(1, got / r.manMonths) * 100 : 100}%` }} /></span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="sch-pal-detail-note">アサイン人月 / 必要人月（案件の全期間）</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -233,6 +321,10 @@ export default function ScheduleView() {
       .filter((p) => !t || p.code.toLowerCase().includes(t) || p.name.toLowerCase().includes(t))
       .sort((a, b) => a.code.localeCompare(b.code));
   }, [db.projects, months, filter]);
+  const assignedMM = useMemo(() => selectProjectManMonths(db), [db]);
+  /** 詳細を開いている案件（同時に 1 件だけ） */
+  const [openPal, setOpenPal] = useState<string | null>(null);
+  const togglePal = useCallback((id: string) => setOpenPal((cur) => (cur === id ? null : id)), []);
 
   /* DnD */
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -460,13 +552,21 @@ export default function ScheduleView() {
               <div className="sch-panel-in">
                 <div className="sch-panel-head">
                   <h2>案件<em>パレット</em></h2>
-                  <p>セルへドラッグして配置</p>
+                  <p>セルへドラッグして配置 · 案件名クリックで詳細</p>
                   <input className="sch-input" placeholder="絞り込み…" value={filter} onChange={(e) => setFilter(e.target.value)} />
                 </div>
                 <div className="sch-pal-list">
                   {palette.length === 0 && <div className="sch-empty-s">この年度に有効な案件がありません</div>}
                   {palette.map((p) => (
-                    <PaletteChip key={p.id} p={p} months={months} />
+                    <PaletteChip
+                      key={p.id}
+                      p={p}
+                      months={months}
+                      open={openPal === p.id}
+                      onToggle={togglePal}
+                      assigned={assignedMM.get(p.id)}
+                      statusMap={statusMap}
+                    />
                   ))}
                 </div>
                 <p className="sch-hint">Alt + ドラッグで複製 / チップ右端を右へドラッグで期間塗り</p>

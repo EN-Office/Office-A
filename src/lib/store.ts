@@ -319,3 +319,26 @@ export function selectProjectFulfilment(db: DB, months: MonthKey[]): Map<ID, Map
   for (const [pid, byStatus] of acc) out.set(pid, new Map([...byStatus].map(([k, v]) => [k, v.size])));
   return out;
 }
+
+/**
+ * 案件ごと・役割ステータスごとのアサイン済み人月（案件の全期間・全月の Σratio。年度で絞らない）。
+ * 必要人月（RequiredRole.manMonths）との比較に使う
+ */
+export function selectProjectManMonths(db: DB): Map<ID, Map<ID | "", number>> {
+  const out = new Map<ID, Map<ID | "", number>>();
+  for (const a of db.assignments) {
+    const byStatus = out.get(a.projectId) ?? new Map<ID | "", number>();
+    const k = a.statusId ?? "";
+    byStatus.set(k, (byStatus.get(k) ?? 0) + (Number.isFinite(a.ratio) ? a.ratio : 1));
+    out.set(a.projectId, byStatus);
+  }
+  return out;
+}
+
+export { defaultManMonths, manMonthFulfilment, roundManMonths, MIN_MAN_MONTHS } from "@shared/types";
+
+const mmFmt = new Intl.NumberFormat("ja-JP", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+/** 人月の表示（小数 1〜2 桁）: 2.0 / 2.5 / 0.33 / 12.0 */
+export function fmtMM(n: number): string {
+  return mmFmt.format(Math.round(n * 100) / 100);
+}

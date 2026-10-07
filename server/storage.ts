@@ -1,7 +1,7 @@
 /** data/db.json を単一ファイルの JSON ストアとして扱う。書込みはアトミック（tmp → rename）。 */
 import fs from "node:fs";
 import path from "node:path";
-import { emptyDB, type DB } from "../shared/types";
+import { defaultManMonths, emptyDB, roundManMonths, type DB, type RequiredRole } from "../shared/types";
 import { seedDB } from "./seed";
 
 const ARRAY_KEYS = ["roles", "members", "roleStatuses", "projects", "assignments"] as const;
@@ -17,7 +17,19 @@ function migrateProject(p: Record<string, unknown>): DB["projects"][number] {
   const amount = typeof rest.amount === "number" && Number.isFinite(rest.amount)
     ? rest.amount
     : typeof unitPrice === "number" && Number.isFinite(unitPrice) ? unitPrice : 0;
-  return { ...rest, amount } as unknown as DB["projects"][number];
+  const required = Array.isArray(rest.required)
+    ? (rest.required as Array<Record<string, unknown>>).map((r) => migrateRequired(r, rest))
+    : [];
+  return { ...rest, amount, required } as unknown as DB["projects"][number];
+}
+
+/** 旧形式（manMonths なし）の必要役割に必要人月を補う。既存値は小数 2 桁・0.01 以上に揃える */
+function migrateRequired(r: Record<string, unknown>, p: Record<string, unknown>): RequiredRole {
+  if (!isObject(r)) return r as unknown as RequiredRole;
+  const count = typeof r.count === "number" && Number.isFinite(r.count) ? r.count : 1;
+  const mm = r.manMonths;
+  const manMonths = typeof mm === "number" && Number.isFinite(mm) && mm > 0 ? roundManMonths(mm) : defaultManMonths(count, p);
+  return { ...r, count, manMonths } as unknown as RequiredRole;
 }
 
 /**

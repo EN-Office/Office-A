@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type InputHTMLAttributes, type Ref, type SelectHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type Ref, type SelectHTMLAttributes } from "react";
 import { Icon, type IconName } from "./Icon";
 
 /* ---------- TextInput ---------- */
@@ -28,6 +28,8 @@ export interface NumberInputProps {
   max?: number;
   step?: number;
   suffix?: string;
+  /** 小数の桁数（表示と確定時の丸め）。未指定は表示 1 桁・丸めなし（通貨は 0 桁） */
+  decimals?: number;
   className?: string;
   "aria-label"?: string;
   id?: string;
@@ -36,7 +38,11 @@ export interface NumberInputProps {
 const fmt = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
 const fmt1 = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 1 });
 
-export function NumberInput({ value, onChange, currency, min, max, step: _step, suffix, className = "", ...rest }: NumberInputProps) {
+export function NumberInput({ value, onChange, currency, min, max, step: _step, suffix, decimals, className = "", ...rest }: NumberInputProps) {
+  const format = useMemo(
+    () => (decimals != null ? new Intl.NumberFormat("ja-JP", { maximumFractionDigits: decimals }) : currency ? fmt : fmt1),
+    [decimals, currency],
+  );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   const cancelled = useRef(false);
@@ -47,7 +53,8 @@ export function NumberInput({ value, onChange, currency, min, max, step: _step, 
     if (cancelled.current) { cancelled.current = false; return; }
     const n = Number(draft.replace(/[^\d.-]/g, ""));
     if (!Number.isFinite(n)) return setDraft(String(value));
-    let v = min != null ? Math.max(min, n) : n;
+    let v = decimals != null ? Math.round(n * 10 ** decimals) / 10 ** decimals : n;
+    v = min != null ? Math.max(min, v) : v;
     if (max != null) v = Math.min(max, v);
     if (v !== value) onChange(v);
   };
@@ -58,7 +65,7 @@ export function NumberInput({ value, onChange, currency, min, max, step: _step, 
       <input
         className="ui-input num"
         inputMode={currency ? "numeric" : "decimal"}
-        value={editing ? draft : (currency ? fmt : fmt1).format(value)}
+        value={editing ? draft : format.format(value)}
         onFocus={(e) => { cancelled.current = false; setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}

@@ -110,12 +110,40 @@ body.sch-filling, body.sch-filling * { cursor: ew-resize !important; user-select
 .sch-pal-code { font-size: 11px; color: var(--ink); }
 .sch-pal-price { font-size: 10.5px; color: var(--ink-2); }
 .sch-pal-price small { color: var(--ink-3); font-size: 9px; }
-.sch-pal-name { font-size: 12.5px; margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sch-pal-name { display: flex; align-items: center; gap: 4px; max-width: 100%; margin: 2px 0 6px; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; border-radius: 2px; }
+.sch-pal-name-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: text-decoration-color var(--dur-fast); }
+.sch-pal-name:hover .sch-pal-name-text, .sch-pal-entry.is-open .sch-pal-name-text { text-decoration-color: currentColor; }
+.sch-pal-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sch-pal-chev { flex: none; display: inline-block; font-size: 10px; line-height: 1; color: var(--ink-3); }
+.sch-pal-name:hover .sch-pal-chev { color: var(--ink); }
 .sch-pal-period { display: grid; grid-template-columns: repeat(12, 1fr); gap: 1px; height: 4px; }
 .sch-pal-period i { background: var(--line); display: block; }
 .sch-pal-range { font-size: 9.5px; color: var(--ink-3); margin-top: 4px; }
 .sch-grip { color: var(--ink-3); opacity: 0; align-self: center; transition: opacity var(--dur-fast); }
 .sch-pal-item:hover .sch-grip { opacity: 1; }
+.sch-pal-entry { display: flex; flex-direction: column; }
+.sch-pal-entry.is-open .sch-pal-item { border-color: var(--line-strong); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.sch-pal-detail { overflow: hidden; border: 1px solid var(--line-strong); border-top: 0; border-radius: 0 0 var(--radius-s) var(--radius-s); background: var(--paper); }
+.sch-pal-detail-in { padding: var(--space-2) var(--space-3) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.sch-pal-facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: var(--space-2) var(--space-4); }
+.sch-pal-facts dd { white-space: nowrap; }
+.sch-pal-facts dt { font-size: 10px; color: var(--ink-3); letter-spacing: .06em; }
+.sch-pal-facts dd { margin: 2px 0 0; font-size: 11.5px; color: var(--ink); }
+.sch-pal-facts dd small { margin-left: 6px; font-size: 10px; color: var(--ink-3); }
+.sch-pal-roles { list-style: none; margin: 0; padding: var(--space-2) 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--space-2); }
+.sch-pal-roles li { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: baseline; }
+.sch-pal-role-n { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--ink); }
+.sch-pal-role-n > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-pal-role-n i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.sch-pal-role-c { font-size: 10px; color: var(--ink-3); flex: none; }
+.sch-pal-role-v { font-size: 11px; color: var(--ink); text-align: right; }
+.sch-pal-role-v small { font-size: 9.5px; color: var(--ink-3); margin-left: 1px; }
+.sch-pal-meter { grid-column: 1 / -1; height: 2px; background: var(--line); margin-top: 4px; }
+.sch-pal-meter i { display: block; height: 100%; background: var(--ok); transition: width var(--dur) var(--ease-out); }
+.sch-pal-roles li.is-short .sch-pal-role-v { color: var(--danger); font-weight: 600; }
+.sch-pal-roles li.is-short .sch-pal-meter i { background: var(--danger); }
+.sch-pal-noreq { font-size: 11px; color: var(--ink-3); padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.sch-pal-detail-note { margin: 0; font-size: 9.5px; color: var(--ink-3); }
 .sch-hint { margin: 0; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); font-size: 10.5px; line-height: 1.6; color: var(--ink-3); }
 
 /* inputs */

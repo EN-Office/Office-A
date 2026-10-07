@@ -4,9 +4,11 @@
  */
 import ExcelJS from "exceljs";
 import {
+  defaultManMonths,
   hoursPerMonthOf,
   hoursRange,
   ratioToHours,
+  roundManMonths,
   uid,
   type Assignment,
   type DB,
@@ -434,17 +436,25 @@ export async function importWorkbook(
             for (const raw of reqText.split(/[,、，\n]+/)) {
               const item = key(raw);
               if (!item) continue;
-              const m = /^(.+?)\s*(?:[×xX*]\s*(\d+))?$/.exec(item);
+              const m = /^(.+?)\s*(?:[×xX*]\s*(\d+))?\s*(?:[(（]\s*([^)）]*?)\s*人月\s*[)）])?$/.exec(item);
               if (!m || !m[1].trim()) {
-                w(`必要役割「${item}」を読めません（例: PM×1, 開発メンバー×3）`);
+                w(`必要役割「${item}」を読めません（例: PM×1 (2.5人月), 開発メンバー×3 (12人月)）`);
                 continue;
               }
               const count = m[2] === undefined ? 1 : Number(m[2]);
               if (count <= 0) continue;
+              let manMonths = defaultManMonths(count, { startMonth: start, endMonth: end });
+              if (m[3] !== undefined) {
+                const n = Number(m[3]);
+                if (m[3] !== "" && Number.isFinite(n) && n > 0) manMonths = roundManMonths(n);
+                else w(`必要役割「${item}」の必要人月を読めないため、人数 × 案件の月数（${manMonths}人月）にしました`);
+              }
               const st = findStatus(m[1]);
               const dup = required.find((x) => x.statusId === st.id);
-              if (dup) dup.count += count;
-              else required.push({ statusId: st.id, count });
+              if (dup) {
+                dup.count += count;
+                dup.manMonths = roundManMonths(dup.manMonths + manMonths);
+              } else required.push({ statusId: st.id, count, manMonths });
             }
           }
 
