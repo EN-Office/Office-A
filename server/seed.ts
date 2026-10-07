@@ -54,7 +54,7 @@ export function seedDB(now = new Date()): DB {
     amount: number,
     from: number,
     to: number,
-    /** [statusId, 人数, 必要人月（案件期間の合計）] */
+    /** [statusId, 人数, 必要工数（h/月）] */
     required: Array<[string, number, number]>,
     color: string,
     note?: string,
@@ -65,17 +65,17 @@ export function seedDB(now = new Date()): DB {
     amount,
     startMonth: months[from],
     endMonth: months[to],
-    required: required.map(([statusId, count, manMonths]) => ({ statusId, count, manMonths })),
+    required: required.map(([statusId, count, hoursPerMonth]) => ({ statusId, count, hoursPerMonth })),
     color,
     ...(note ? { note } : {}),
   });
   const projects: Project[] = [
-    p(1, "基幹業務システム刷新", 48_000_000, 0, 5, [["st_pm", 1, 3], ["st_pl", 1, 6], ["st_dev", 3, 15]], "#e07a5f", "大手製造業向け。上期で本番切替。"),
-    p(2, "ECサイトリニューアル", 26_000_000, 2, 8, [["st_pl", 1, 3.5], ["st_dev", 2, 10]], "#3d8bfd"),
-    p(3, "物流管理アプリ開発", 32_000_000, 4, 11, [["st_pm", 1, 4], ["st_dev", 2, 12], ["st_bp", 2, 12]], "#81b29a"),
-    p(4, "社内ポータル保守運用", 12_000_000, 0, 11, [["st_dev", 1, 9]], "#f2cc8f"),
-    p(5, "データ分析基盤構築", 28_500_000, 6, 11, [["st_pm", 1, 3], ["st_pl", 1, 4.5], ["st_dev", 2, 8]], "#9b72cf"),
-    p(6, "モバイル決済アプリ", 36_000_000, 8, 11, [["st_pl", 1, 4], ["st_dev", 3, 9.5]], "#2ec4b6"),
+    p(1, "基幹業務システム刷新", 48_000_000, 0, 5, [["st_pm", 1, 80], ["st_pl", 1, 160], ["st_dev", 3, 400]], "#e07a5f", "大手製造業向け。上期で本番切替。"),
+    p(2, "ECサイトリニューアル", 26_000_000, 2, 8, [["st_pl", 1, 80], ["st_dev", 2, 240]], "#3d8bfd"),
+    p(3, "物流管理アプリ開発", 32_000_000, 4, 11, [["st_pm", 1, 80], ["st_dev", 2, 240], ["st_bp", 2, 240]], "#81b29a"),
+    p(4, "社内ポータル保守運用", 12_000_000, 0, 11, [["st_dev", 1, 120]], "#f2cc8f"),
+    p(5, "データ分析基盤構築", 28_500_000, 6, 11, [["st_pm", 1, 80], ["st_pl", 1, 120], ["st_dev", 2, 240]], "#9b72cf"),
+    p(6, "モバイル決済アプリ", 36_000_000, 8, 11, [["st_pl", 1, 160], ["st_dev", 3, 400]], "#2ec4b6"),
   ];
 
   // [projectId, memberId, statusId, fromIdx, toIdx, ratio]

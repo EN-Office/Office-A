@@ -70,7 +70,7 @@ export default function SettingsView() {
           <label className="st-field">
             <span className="eyebrow">1人月の時間</span>
             <NumberInput value={hpm} min={1} max={744} step={1} suffix="h" onChange={(hoursPerMonth) => updateSettings({ hoursPerMonth })} aria-label="1人月の時間" />
-            <span className="st-hint">アサインの工数は時間で入力・表示します（{hpm}h = 1人月）。Excel のアサインセルも「80h」のように時間で書きます。</span>
+            <span className="st-hint">工数はすべて時間で入力・表示します。この値はフルタイム 1 名の月の時間（稼働率 100% = {hpm}h）で、必要工数の既定値にも使います。Excel のアサインセルも「80h」のように時間で書きます。</span>
           </label>
         </div>
       </Section>

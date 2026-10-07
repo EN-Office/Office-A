@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import type { Assignment, DB, MonthKey, Project } from "@shared/types";
 import { isWithin } from "@shared/types";
 import { clampHours, hoursPerMonthOf, hoursRange, hoursToRatio, ratioToHours } from "../../lib/store";
-import { fmtHours, fmtManMonth, projectActiveIn } from "./helpers";
+import { fmtHours, projectActiveIn } from "./helpers";
 
 export interface Anchor { left: number; top: number; right: number; bottom: number }
 
@@ -39,7 +39,7 @@ function useFloating(anchor: Anchor, width: number, estH: number, onClose: () =>
   return { ref, pos };
 }
 
-/** クイック工数（1人月に対する割合）。0.5 / 1 人月を主ボタン、0.25 / 0.75 を補助ボタンにする */
+/** クイック工数（1人月時間に対する割合）。80h / 160h（既定）を主ボタン、40h / 120h を補助ボタンにする */
 const QUICK_MAIN = [0.5, 1];
 const QUICK_SUB = [0.25, 0.75];
 
@@ -123,7 +123,6 @@ export function AssignmentPopover({ anchor, assignment: a, db, months, onClose, 
         onClick={() => setHours(h)}
       >
         <b className="sch-mono">{fmtHours(h)}</b>
-        {main && <small>{fmtManMonth(q)}</small>}
       </button>
     );
   };
@@ -149,7 +148,7 @@ export function AssignmentPopover({ anchor, assignment: a, db, months, onClose, 
       </div>
 
       <label className="sch-pop-label" htmlFor={`sch-hours-${a.id}`}>
-        工数 (h) <span className="sch-mono sch-pop-derived">= {fmtManMonth(a.ratio)}</span>
+        工数 (h) <span className="sch-mono sch-pop-derived">= {Math.round(a.ratio * 1000) / 10}%</span>
       </label>
       <HoursInput id={`sch-hours-${a.id}`} value={hours} min={hMin} max={hMax} onCommit={setHours} />
       <div className="sch-quick">{QUICK_MAIN.map((q) => quickBtn(q, true))}</div>

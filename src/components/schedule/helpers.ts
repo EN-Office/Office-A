@@ -4,8 +4,6 @@ import { isWithin, parseMonth } from "@shared/types";
 export const r2 = (n: number) => Math.round(n * 100) / 100;
 /** 工数表示: 80h / 100.5h */
 export const fmtHours = (h: number) => `${Math.round(h * 10) / 10}h`;
-/** 人月表示: 0.5人月 */
-export const fmtManMonth = (r: number) => `${Math.round(r * 1000) / 1000}人月`;
 export const monthNum = (k: MonthKey) => parseMonth(k).month;
 
 export function currentMonthKey(): MonthKey {

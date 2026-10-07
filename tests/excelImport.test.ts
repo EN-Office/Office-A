@@ -105,7 +105,7 @@ describe("importWorkbook", () => {
       header.eachCell((c, i) => {
         if (c.value === "2026-10") values[i] = "PRJ-2026-099 [QA]";
       });
-      const row = asg.insertRow(rowIndexOf(asg, "月別稼働人月"), []);
+      const row = asg.insertRow(rowIndexOf(asg, "月別稼働時間"), []);
       for (const [i, v] of Object.entries(values)) row.getCell(Number(i)).value = v;
     });
 
@@ -127,8 +127,8 @@ describe("importWorkbook", () => {
     expect(qa).toBeTruthy();
     const p99 = next.projects.find((p) => p.code === "PRJ-2026-099")!;
     expect(p99).toMatchObject({ name: "新規案件", amount: 500000, startMonth: "2026-10", endMonth: "2027-03" });
-    // 旧形式（人月なし）は 人数 × 案件の月数（2026-10〜2027-03 = 6ヶ月）
-    expect(p99.required).toEqual([{ statusId: "st_pm", count: 1, manMonths: 6 }, { statusId: qa.id, count: 2, manMonths: 12 }]);
+    // 括弧なしは 人数 × 1人月時間（h/月）
+    expect(p99.required).toEqual([{ statusId: "st_pm", count: 1, hoursPerMonth: 160 }, { statusId: qa.id, count: 2, hoursPerMonth: 320 }]);
     expect(cellOf(next, rookie.id, "2026-10")).toEqual([{ projectId: p99.id, statusId: qa.id, ratio: 1 }]);
     // セル書き換え
     expect(cellOf(next, "m04", "2026-05")).toEqual([{ projectId: "p02", statusId: "st_pm", ratio: 0.5 }]);
@@ -185,38 +185,54 @@ describe("importWorkbook", () => {
     expect(report.warnings.some((w) => w.includes("データ行がない"))).toBe(true);
   });
 
-  it("round-trips required man-months losslessly at 2 decimals and parses the (N人月) part", async () => {
+  it("round-trips required hours per month losslessly and parses (Nh/月) and legacy (N人月)", async () => {
     const db = seedDB(NOW);
     const p01 = db.projects.find((p) => p.id === "p01")!;
     p01.required = [
-      { statusId: "st_pm", count: 1, manMonths: 2.5 },
-      { statusId: "st_pl", count: 1, manMonths: 0.01 },
-      { statusId: "st_dev", count: 3, manMonths: 12.34 },
+      { statusId: "st_pm", count: 1, hoursPerMonth: 160 },
+      { statusId: "st_pl", count: 1, hoursPerMonth: 1 },
+      { statusId: "st_dev", count: 3, hoursPerMonth: 437 },
     ];
     const buf = await exported(db);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf as unknown as ArrayBuffer);
-    expect(cellAt(wb.getWorksheet("案件")!, "p01", "必要役割").value).toBe("PM×1 (2.5人月), PL×1 (0.01人月), 開発メンバー×3 (12.34人月)");
+    expect(cellAt(wb.getWorksheet("案件")!, "p01", "必要役割").value).toBe("PM×1 (160h/月), PL×1 (1h/月), 開発メンバー×3 (437h/月)");
     const { db: next, report } = await importWorkbook(buf, db);
     expect(byId(next.projects)).toEqual(byId(db.projects));
     expect(report.projects).toMatchObject({ added: 0, updated: 0, removed: 0 });
     expect(report.warnings).toEqual([]);
 
-    // 手入力の揺れ: 全角括弧・全角数字、人数省略、3 桁目以降は丸め、旧形式との混在、読めない人月は既定値
+    // 手入力の揺れ: 全角括弧・全角数字・全角ｈ／月、/月 省略、小数は整数に丸め、人数省略、
+    // 旧形式（人月 → 人月 × 160h ÷ 案件の月数）、括弧なし（人数 × 160h）、読めない値は既定値
     const edited = await edit(buf, (w) => {
       cellAt(w.getWorksheet("案件")!, "p01", "必要役割").value =
-        "PM×1（１．５人月）, PL (0.333人月), 開発メンバー×2, 開発BP×1 (abc人月)";
+        "PM×1（８０ｈ／月）, PL (99.6h), 開発メンバー×2, 開発BP×1 (abch/月), QA×1 (3人月)";
     });
     const { db: after, report: r2 } = await importWorkbook(edited, db);
-    // p01 は 2026-04〜2026-09 の 6 ヶ月
+    const qa = after.roleStatuses.find((s) => s.name === "QA")!;
+    // p01 は 2026-04〜2026-09 の 6 ヶ月: 3人月 × 160h ÷ 6 = 80h/月
     expect(after.projects.find((p) => p.id === "p01")!.required).toEqual([
-      { statusId: "st_pm", count: 1, manMonths: 1.5 },
-      { statusId: "st_pl", count: 1, manMonths: 0.33 },
-      { statusId: "st_dev", count: 2, manMonths: 12 },
-      { statusId: "st_bp", count: 1, manMonths: 6 },
+      { statusId: "st_pm", count: 1, hoursPerMonth: 80 },
+      { statusId: "st_pl", count: 1, hoursPerMonth: 100 },
+      { statusId: "st_dev", count: 2, hoursPerMonth: 320 },
+      { statusId: "st_bp", count: 1, hoursPerMonth: 160 },
+      { statusId: qa.id, count: 1, hoursPerMonth: 80 },
     ]);
     expect(r2.warnings).toHaveLength(1);
-    expect(r2.warnings[0]).toMatch(/必要人月を読めないため、人数 × 案件の月数（6人月）にしました/);
+    expect(r2.warnings[0]).toMatch(/必要工数を読めないため、人数 × 160h\/月（160h\/月）にしました/);
+  });
+
+  it("skips the legacy 月別稼働人月 total row of older exports", async () => {
+    const db = seedDB(NOW);
+    const buf = await edit(await exported(db), (wb) => {
+      const asg = wb.getWorksheet("アサイン")!;
+      const row = asg.addRow([]);
+      row.getCell(2).value = "月別稼働人月";
+      row.getCell(4).value = 2.5;
+    });
+    const { db: next, report } = await importWorkbook(buf, db);
+    expect(next.members.length).toBe(db.members.length);
+    expect(report.members.added).toBe(0);
   });
 
   it("skips malformed lines and clamps hours to 1..2×hoursPerMonth with warnings", async () => {

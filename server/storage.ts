@@ -1,7 +1,7 @@
 /** data/db.json を単一ファイルの JSON ストアとして扱う。書込みはアトミック（tmp → rename）。 */
 import fs from "node:fs";
 import path from "node:path";
-import { defaultManMonths, emptyDB, roundManMonths, type DB, type RequiredRole } from "../shared/types";
+import { defaultRequiredHours, emptyDB, legacyManMonthsToHours, roundRequiredHours, type DB, type RequiredRole } from "../shared/types";
 import { seedDB } from "./seed";
 
 const ARRAY_KEYS = ["roles", "members", "roleStatuses", "projects", "assignments"] as const;
@@ -11,25 +11,34 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /** 旧形式（unitPrice = 1人月単価）の案件を受注金額 amount へ移行する。値はそのまま引き継ぐ */
-function migrateProject(p: Record<string, unknown>): DB["projects"][number] {
+function migrateProject(p: Record<string, unknown>, hpm: number): DB["projects"][number] {
   if (!isObject(p)) return p as unknown as DB["projects"][number];
   const { unitPrice, ...rest } = p;
   const amount = typeof rest.amount === "number" && Number.isFinite(rest.amount)
     ? rest.amount
     : typeof unitPrice === "number" && Number.isFinite(unitPrice) ? unitPrice : 0;
   const required = Array.isArray(rest.required)
-    ? (rest.required as Array<Record<string, unknown>>).map((r) => migrateRequired(r, rest))
+    ? (rest.required as Array<Record<string, unknown>>).map((r) => migrateRequired(r, rest, hpm))
     : [];
   return { ...rest, amount, required } as unknown as DB["projects"][number];
 }
 
-/** 旧形式（manMonths なし）の必要役割に必要人月を補う。既存値は小数 2 桁・0.01 以上に揃える */
-function migrateRequired(r: Record<string, unknown>, p: Record<string, unknown>): RequiredRole {
+/**
+ * 必要役割の工数を h/月（hoursPerMonth）に揃える。
+ * 旧形式の manMonths（案件全期間の人月）は round(manMonths × 1人月時間 ÷ 案件の月数)（最小 1）、
+ * どちらもなければ 人数 × 1人月時間。既存の hoursPerMonth は整数・1 以上に丸める
+ */
+function migrateRequired(r: Record<string, unknown>, p: Record<string, unknown>, hpm: number): RequiredRole {
   if (!isObject(r)) return r as unknown as RequiredRole;
-  const count = typeof r.count === "number" && Number.isFinite(r.count) ? r.count : 1;
-  const mm = r.manMonths;
-  const manMonths = typeof mm === "number" && Number.isFinite(mm) && mm > 0 ? roundManMonths(mm) : defaultManMonths(count, p);
-  return { ...r, count, manMonths } as unknown as RequiredRole;
+  const { manMonths: mm, ...rest } = r;
+  const count = typeof rest.count === "number" && Number.isFinite(rest.count) ? rest.count : 1;
+  const h = rest.hoursPerMonth;
+  const hoursPerMonth = typeof h === "number" && Number.isFinite(h) && h > 0
+    ? roundRequiredHours(h)
+    : typeof mm === "number" && Number.isFinite(mm) && mm > 0
+      ? legacyManMonthsToHours(mm, p, hpm)
+      : defaultRequiredHours(count, hpm);
+  return { ...rest, count, hoursPerMonth } as unknown as RequiredRole;
 }
 
 /**
@@ -53,7 +62,7 @@ export function normalizeDB(input: unknown): DB | null {
     roles: (input.roles as DB["roles"] | undefined) ?? base.roles,
     members: (input.members as DB["members"] | undefined) ?? [],
     roleStatuses: (input.roleStatuses as DB["roleStatuses"] | undefined) ?? base.roleStatuses,
-    projects: ((input.projects as Array<Record<string, unknown>> | undefined) ?? []).map(migrateProject),
+    projects: ((input.projects as Array<Record<string, unknown>> | undefined) ?? []).map((p) => migrateProject(p, settings.hoursPerMonth)),
     assignments: (input.assignments as DB["assignments"] | undefined) ?? [],
     settings,
   };

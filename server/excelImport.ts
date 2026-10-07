@@ -4,11 +4,12 @@
  */
 import ExcelJS from "exceljs";
 import {
-  defaultManMonths,
+  defaultRequiredHours,
   hoursPerMonthOf,
   hoursRange,
+  legacyManMonthsToHours,
   ratioToHours,
-  roundManMonths,
+  roundRequiredHours,
   uid,
   type Assignment,
   type DB,
@@ -22,7 +23,7 @@ import {
   type Role,
   type RoleStatus,
 } from "../shared/types";
-import { SHEET_NAMES, TOTAL_ROW_LABELS } from "./excel";
+import { LEGACY_TOTAL_ROW_LABELS, SHEET_NAMES, TOTAL_ROW_LABELS } from "./excel";
 
 /** 取り込みを続行できない入力（xlsx でない等） */
 export class ImportError extends Error {}
@@ -42,8 +43,15 @@ const PALETTE = [
  * グループ: 1=コード, 2=役割名, 3=旧形式の按分, 4=時間
  */
 export const ASSIGNMENT_LINE_RE = /^([^\s[\]×]+)(?:\s*\[(.*?)\])?(?:\s*(?:[×xX*]\s*([0-9.]+)|([0-9.]+)\s*[hH]))?$/;
-/** 旧版で出力した集計行（取り込み時は読み飛ばす） */
-const LEGACY_TOTAL_ROW_LABELS = ["月別売上合計"];
+
+/**
+ * 案件シートの必要役割 1 件（NFKC 正規化後に照合）:
+ *   `<役割名>×<人数> (<時間>h/月)` … 必要工数（h/月。`h` だけ・`/月` 省略も可）
+ *   `<役割名>×<人数> (<人月>人月)`  … 旧形式（案件全期間の人月 → 人月 × 1人月時間 ÷ 案件の月数）
+ *   `<役割名>×<人数>`               … 人数 × 1人月時間
+ * グループ: 1=役割名, 2=人数, 3=数値, 4=単位（"人月" / "h"）
+ */
+export const REQUIRED_ROLE_RE = /^(.+?)\s*(?:[×xX*]\s*(\d+))?\s*(?:[(（]\s*([^)）]*?)\s*(人月|[hH])\s*(?:\/\s*月)?\s*[)）])?$/;
 
 /* ---------- セル値ヘルパ ---------- */
 
@@ -431,30 +439,33 @@ export async function importWorkbook(
           }
 
           const required: RequiredRole[] = [];
+          const reqHpm = hoursPerMonthOf(current);
           const reqText = r.text("required");
           if (reqText) {
             for (const raw of reqText.split(/[,、，\n]+/)) {
               const item = key(raw);
               if (!item) continue;
-              const m = /^(.+?)\s*(?:[×xX*]\s*(\d+))?\s*(?:[(（]\s*([^)）]*?)\s*人月\s*[)）])?$/.exec(item);
+              const m = REQUIRED_ROLE_RE.exec(item);
               if (!m || !m[1].trim()) {
-                w(`必要役割「${item}」を読めません（例: PM×1 (2.5人月), 開発メンバー×3 (12人月)）`);
+                w(`必要役割「${item}」を読めません（例: PM×1 (${reqHpm}h/月), 開発メンバー×3 (${reqHpm * 3}h/月)）`);
                 continue;
               }
               const count = m[2] === undefined ? 1 : Number(m[2]);
               if (count <= 0) continue;
-              let manMonths = defaultManMonths(count, { startMonth: start, endMonth: end });
-              if (m[3] !== undefined) {
+              let hoursPerMonth = defaultRequiredHours(count, reqHpm);
+              if (m[4] !== undefined) {
                 const n = Number(m[3]);
-                if (m[3] !== "" && Number.isFinite(n) && n > 0) manMonths = roundManMonths(n);
-                else w(`必要役割「${item}」の必要人月を読めないため、人数 × 案件の月数（${manMonths}人月）にしました`);
+                const legacy = m[4] === "人月";
+                if (m[3] !== "" && Number.isFinite(n) && n > 0) {
+                  hoursPerMonth = legacy ? legacyManMonthsToHours(n, { startMonth: start, endMonth: end }, reqHpm) : roundRequiredHours(n);
+                } else w(`必要役割「${item}」の必要工数を読めないため、人数 × ${reqHpm}h/月（${hoursPerMonth}h/月）にしました`);
               }
               const st = findStatus(m[1]);
               const dup = required.find((x) => x.statusId === st.id);
               if (dup) {
                 dup.count += count;
-                dup.manMonths = roundManMonths(dup.manMonths + manMonths);
-              } else required.push({ statusId: st.id, count, manMonths });
+                dup.hoursPerMonth = roundRequiredHours(dup.hoursPerMonth + hoursPerMonth);
+              } else required.push({ statusId: st.id, count, hoursPerMonth });
             }
           }
 

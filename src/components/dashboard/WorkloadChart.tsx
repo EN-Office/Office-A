@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MonthKey, Project } from "@shared/types";
-import { fmtHours, fmtManMonth, monthNum } from "../schedule/helpers";
+import { fmtHours, monthNum } from "../schedule/helpers";
 
 /** 月ごとの稼働（時間）。parts は案件別の内訳 */
 export interface WorkloadDatum {
@@ -20,7 +20,7 @@ function niceMax(v: number): { max: number; step: number } {
 }
 
 /** 月別稼働（時間）の案件別積み上げ棒グラフ */
-export default function WorkloadChart({ data, nowKey, hoursPerMonth }: { data: WorkloadDatum[]; nowKey: MonthKey; hoursPerMonth: number }) {
+export default function WorkloadChart({ data, nowKey }: { data: WorkloadDatum[]; nowKey: MonthKey }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(720);
   const [hover, setHover] = useState<number | null>(null);
@@ -81,7 +81,7 @@ export default function WorkloadChart({ data, nowKey, hoursPerMonth }: { data: W
         <div className="dash-tip" style={{ left: tipLeft, top: 0 }}>
           <div className="dash-tip-h">
             <span className="dash-mono">{hd.month}</span>
-            <b className="dash-mono">{fmtHours(hd.total)} · {fmtManMonth(hd.total / hoursPerMonth)}</b>
+            <b className="dash-mono">{fmtHours(hd.total)}</b>
           </div>
           {hd.parts.length === 0 && <div className="dash-tip-r">アサインなし</div>}
           {[...hd.parts].sort((a, b) => b.value - a.value).map((p) => (

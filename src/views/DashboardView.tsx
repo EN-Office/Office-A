@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { fiscalMonths } from "@shared/types";
-import { contractTotal, fmtMM, hoursPerMonthOf, ratioToHours, selectProjectManMonths, selectStatusMap, useStore } from "../lib/store";
+import { contractTotal, hoursPerMonthOf, ratioToHours, selectProjectAssignedHours, selectStatusMap, useStore } from "../lib/store";
 import WorkloadChart, { type WorkloadDatum } from "../components/dashboard/WorkloadChart";
-import { currentMonthKey, fmtHours, fmtManMonth, fmtYen, fmtYenShort, monthNum, projectActiveIn, r2 } from "../components/schedule/helpers";
+import { currentMonthKey, fmtHours, fmtYen, fmtYenShort, monthNum, projectActiveIn } from "../components/schedule/helpers";
 import "../components/dashboard/dashboard.css";
 
 const fade = (i: number) => ({
@@ -44,18 +44,18 @@ export default function DashboardView() {
     const sums = new Map<string, number>();
     for (const a of asgM) sums.set(`${a.memberId}|${a.month}`, (sums.get(`${a.memberId}|${a.month}`) ?? 0) + a.ratio);
 
-    // 役割ごとのアサイン人月は案件の全期間（年度外の月も含む）で必要人月と比べる
-    const allMM = selectProjectManMonths({ ...db, assignments: db.assignments.filter((a) => memberIds.has(a.memberId)) });
+    // 役割ごとのアサイン平均（h/月）は案件の全期間（年度外の月も含む）で必要工数（h/月）と比べる
+    const allH = selectProjectAssignedHours({ ...db, assignments: db.assignments.filter((a) => memberIds.has(a.memberId)) });
     const activeProjects = db.projects.filter((p) => projectActiveIn(p, months)).sort((a, b) => a.code.localeCompare(b.code));
     const projRows = activeProjects.map((p) => {
       const mine = asgM.filter((a) => a.projectId === p.id);
-      const mm = mine.reduce((s, a) => s + a.ratio, 0);
+      const hours = ratioToHours(mine.reduce((s, a) => s + a.ratio, 0), hpm);
       const req = p.required.map((r) => {
         const got = new Set(mine.filter((a) => a.statusId === r.statusId).map((a) => a.memberId)).size;
-        const gotMM = allMM.get(p.id)?.get(r.statusId) ?? 0;
-        return { ...r, got, gotMM };
+        const gotH = allH.get(p.id)?.get(r.statusId) ?? 0;
+        return { ...r, got, gotH };
       });
-      return { p, mm, req, people: new Set(mine.map((a) => a.memberId)).size };
+      return { p, hours, req, people: new Set(mine.map((a) => a.memberId)).size };
     });
 
     const roleRows = db.roles.map((role) => {
@@ -73,8 +73,8 @@ export default function DashboardView() {
       .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
 
-    const totalMM = chart.reduce((s, c) => s + c.total, 0) / hpm;
-    return { chart, contract, totalMM, working: working.size, avg, projRows, roleRows, free, activeCount: activeProjects.length };
+    const totalHours = chart.reduce((s, c) => s + c.total, 0);
+    return { chart, contract, totalHours, working: working.size, avg, projRows, roleRows, free, activeCount: activeProjects.length };
   }, [db, months, hpm]);
 
   const kpis = [
@@ -103,8 +103,8 @@ export default function DashboardView() {
 
       <motion.section className="dash-sec" {...fade(2)}>
         <h2 className="dash-h2">月別<i>稼働</i></h2>
-        <p className="dash-note dash-note--top">案件別の稼働時間（{hpm}h = 1人月）· 年度合計 {fmtManMonth(d.totalMM)} · {fmtHours(d.totalMM * hpm)}</p>
-        <WorkloadChart data={d.chart} nowKey={nowKey} hoursPerMonth={hpm} />
+        <p className="dash-note dash-note--top">案件別の稼働時間 · 年度合計 {fmtHours(d.totalHours)}</p>
+        <WorkloadChart data={d.chart} nowKey={nowKey} />
         <ul className="dash-legend">
           {db.projects.filter((p) => d.chart.some((c) => c.parts.some((x) => x.project.id === p.id))).map((p) => (
             <li key={p.id}><i style={{ background: p.color }} /><span className="dash-mono">{p.code}</span> {p.name}</li>
@@ -121,30 +121,30 @@ export default function DashboardView() {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>コード</th><th>案件名</th><th className="r">受注金額</th><th>期間</th><th className="r">年度稼働</th><th>必要役割（アサイン人月 / 必要人月 · 案件全期間）</th>
+                  <th>コード</th><th>案件名</th><th className="r">受注金額</th><th>期間</th><th className="r">年度稼働</th><th>必要役割（アサイン平均 / 必要 h/月 · 案件全期間）</th>
                 </tr>
               </thead>
               <tbody>
-                {d.projRows.map(({ p, mm, req }) => (
+                {d.projRows.map(({ p, hours, req }) => (
                   <tr key={p.id}>
                     <td className="dash-mono"><i className="dash-sw" style={{ background: p.color }} />{p.code}</td>
                     <td>{p.name}</td>
                     <td className="r dash-mono">{fmtYen(p.amount)}</td>
                     <td className="dash-mono dash-period">{p.startMonth} → {p.endMonth}</td>
-                    <td className="r dash-mono">{mm ? <>{fmtManMonth(mm)}<span className="dash-muted">{fmtHours(ratioToHours(mm, hpm))}</span></> : "—"}</td>
+                    <td className="r dash-mono">{hours ? fmtHours(hours) : "—"}</td>
                     <td>
                       {req.length === 0 ? <span className="dash-muted">指定なし</span> : (
                         <div className="dash-reqs">
                           {req.map((r) => {
                             const st = statusMap.get(r.statusId);
-                            const short = r.gotMM + 1e-9 < r.manMonths;
+                            const short = r.gotH + 1e-9 < r.hoursPerMonth;
                             const name = st?.name ?? "?";
-                            const tip = `${name}: ${fmtMM(r.gotMM)} / ${fmtMM(r.manMonths)}人月${short ? `（${fmtMM(r.manMonths - r.gotMM)}人月 不足）` : "（充足）"} · 年度内アサイン ${r.got}/${r.count} 名`;
+                            const tip = `${name}: アサイン平均 ${fmtHours(r.gotH)} / 必要 ${fmtHours(r.hoursPerMonth)}/月${short ? `（${fmtHours(r.hoursPerMonth - r.gotH)}/月 不足）` : "（充足）"} · 年度内アサイン ${r.got}/${r.count} 名`;
                             return (
                               <div key={r.statusId} className={`dash-req ${short ? "is-short" : ""}`} title={tip}>
                                 <span className="dash-req-n">{name}<span className="dash-req-c dash-mono">{r.got}/{r.count}名</span></span>
-                                <span className="dash-mono dash-req-v">{fmtMM(r.gotMM)}/{fmtMM(r.manMonths)}<small>人月</small></span>
-                                <span className="dash-meter"><i style={{ width: `${r.manMonths > 0 ? Math.min(1, r.gotMM / r.manMonths) * 100 : 100}%` }} /></span>
+                                <span className="dash-mono dash-req-v">{fmtHours(r.gotH)} / {fmtHours(r.hoursPerMonth)}<small>/月</small></span>
+                                <span className="dash-meter"><i style={{ width: `${r.hoursPerMonth > 0 ? Math.min(1, r.gotH / r.hoursPerMonth) * 100 : 100}%` }} /></span>
                               </div>
                             );
                           })}
@@ -188,7 +188,7 @@ export default function DashboardView() {
               ))}
             </ul>
           )}
-          <p className="dash-note">合計 {r2(d.free.reduce((s, x) => s + x.count, 0))} 人月分の空き（Σ稼働率 = 0 の月）</p>
+          <p className="dash-note">合計 {fmtHours(d.free.reduce((s, x) => s + x.count, 0) * hpm)} 分の空き（Σ稼働率 = 0 の月）</p>
         </motion.section>
       </div>
     </div>

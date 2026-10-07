@@ -14,7 +14,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import type { Assignment, MonthKey, Project } from "@shared/types";
 import { fiscalMonths, flattenTree, isWithin, projectMonthCount } from "@shared/types";
-import { contractTotal, fmtMM, hoursPerMonthOf, ratioToHours, selectProjectManMonths, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
+import { contractTotal, hoursPerMonthOf, ratioToHours, selectProjectAssignedHours, selectRoleMap, selectStatusMap, useStore } from "../lib/store";
 import { ChipBody } from "../components/schedule/Chip";
 import { AssignmentPopover, QuickPicker, rectOf, type Anchor } from "../components/schedule/Popovers";
 import {
@@ -25,7 +25,6 @@ import {
   indexAssignments,
   monthNum,
   projectActiveIn,
-  r2,
 } from "../components/schedule/helpers";
 import "../components/schedule/schedule.css";
 
@@ -134,7 +133,7 @@ const Cell = memo(function Cell({
           <span
             className={`sch-load ${over ? "is-over" : ""}`}
             style={{ width: `${Math.min(sum, 1) * 100}%` }}
-            title={`稼働 ${fmtHours(ratioToHours(sum, hpm))}（${r2(sum)}人月）`}
+            title={`稼働 ${fmtHours(ratioToHours(sum, hpm))}（${Math.round(sum * 100)}%）`}
           />
         )}
       </div>
@@ -149,7 +148,7 @@ interface PaletteChipProps {
   months: MonthKey[];
   open: boolean;
   onToggle: (id: string) => void;
-  /** statusId → 案件全期間のアサイン人月 */
+  /** statusId → 案件期間の月平均アサイン時間（h/月） */
   assigned: Map<string, number> | undefined;
   statusMap: ReturnType<typeof selectStatusMap>;
 }
@@ -225,6 +224,12 @@ function PaletteChip({ p, months, open, onToggle, assigned, statusMap }: Palette
                 <div><dt>受注金額</dt><dd className="sch-mono">{fmtYen(p.amount)}</dd></div>
                 <div><dt>期間</dt><dd className="sch-mono">{p.startMonth} → {p.endMonth}<small>{projectMonthCount(p) ?? "—"}ヶ月</small></dd></div>
               </dl>
+              {p.required.length > 0 && (
+                <div className="sch-pal-total">
+                  <span>必要工数 計</span>
+                  <b className="sch-mono">{fmtHours(p.required.reduce((s, r) => s + r.hoursPerMonth, 0))}<small>/月</small></b>
+                </div>
+              )}
               {p.required.length === 0 ? (
                 <div className="sch-pal-noreq">必要役割 未設定</div>
               ) : (
@@ -232,7 +237,7 @@ function PaletteChip({ p, months, open, onToggle, assigned, statusMap }: Palette
                   {p.required.map((r) => {
                     const st = statusMap.get(r.statusId);
                     const got = assigned?.get(r.statusId) ?? 0;
-                    const short = got + 1e-9 < r.manMonths;
+                    const short = got + 1e-9 < r.hoursPerMonth;
                     return (
                       <li key={r.statusId} className={short ? "is-short" : "is-met"}>
                         <span className="sch-pal-role-n">
@@ -240,16 +245,16 @@ function PaletteChip({ p, months, open, onToggle, assigned, statusMap }: Palette
                           <span>{st?.name ?? "?"}</span>
                           <span className="sch-mono sch-pal-role-c">{r.count}名</span>
                         </span>
-                        <span className="sch-mono sch-pal-role-v" title={short ? `${fmtMM(r.manMonths - got)}人月 不足` : "充足"}>
-                          {fmtMM(got)} / {fmtMM(r.manMonths)}<small>人月</small>
+                        <span className="sch-mono sch-pal-role-v" title={short ? `${fmtHours(r.hoursPerMonth - got)}/月 不足` : "充足"}>
+                          必要 {fmtHours(r.hoursPerMonth)}<small>/月</small> · アサイン平均 {fmtHours(got)}<small>/月</small>
                         </span>
-                        <span className="sch-pal-meter"><i style={{ width: `${r.manMonths > 0 ? Math.min(1, got / r.manMonths) * 100 : 100}%` }} /></span>
+                        <span className="sch-pal-meter"><i style={{ width: `${r.hoursPerMonth > 0 ? Math.min(1, got / r.hoursPerMonth) * 100 : 100}%` }} /></span>
                       </li>
                     );
                   })}
                 </ul>
               )}
-              <p className="sch-pal-detail-note">アサイン人月 / 必要人月（案件の全期間）</p>
+              <p className="sch-pal-detail-note">アサイン平均 = 案件期間のアサイン時間合計 ÷ 案件の月数</p>
             </div>
           </motion.div>
         )}
@@ -295,7 +300,7 @@ export default function ScheduleView() {
         const s = list.reduce((x, a) => x + a.ratio, 0);
         y += s;
         monthSum[i] += s;
-        free += Math.max(0, 1 - s);
+        free += Math.max(0, hpm - ratioToHours(s, hpm));
       });
       memberYear.set(member.id, y);
       used += y;
@@ -309,7 +314,7 @@ export default function ScheduleView() {
       avg: n ? used / (n * 12) : 0,
       free,
     };
-  }, [db, rows, months, cells]);
+  }, [db, rows, months, cells, hpm]);
 
   /* パレット */
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1200); // 狭い画面ではパレットを畳んでマトリクスを優先
@@ -321,7 +326,7 @@ export default function ScheduleView() {
       .filter((p) => !t || p.code.toLowerCase().includes(t) || p.name.toLowerCase().includes(t))
       .sort((a, b) => a.code.localeCompare(b.code));
   }, [db.projects, months, filter]);
-  const assignedMM = useMemo(() => selectProjectManMonths(db), [db]);
+  const assignedHours = useMemo(() => selectProjectAssignedHours(db), [db]);
   /** 詳細を開いている案件（同時に 1 件だけ） */
   const [openPal, setOpenPal] = useState<string | null>(null);
   const togglePal = useCallback((id: string) => setOpenPal((cur) => (cur === id ? null : id)), []);
@@ -455,8 +460,8 @@ export default function ScheduleView() {
               <dd className="sch-mono">{Math.round(stats.avg * 100)}<small>%</small></dd>
             </div>
             <div>
-              <dt>未アサイン人月</dt>
-              <dd className="sch-mono">{r2(stats.free).toLocaleString("ja-JP")}</dd>
+              <dt>未アサイン時間</dt>
+              <dd className="sch-mono">{Math.round(stats.free * 10) / 10}<small>h</small></dd>
             </div>
           </dl>
         </header>
@@ -527,15 +532,14 @@ export default function ScheduleView() {
                 </tbody>
                 <tfoot>
                   <tr className="sch-foot sch-foot-1">
-                    <th className="sch-foot-label">稼働人月</th>
+                    <th className="sch-foot-label">稼働時間</th>
                     {stats.monthSum.map((v, i) => (
                       <td key={i} className="sch-mono">
-                        {v ? <>{r2(v)}<span className="sch-foot-h">{fmtHours(ratioToHours(v, hpm))}</span></> : "—"}
+                        {v ? fmtHours(ratioToHours(v, hpm)) : "—"}
                       </td>
                     ))}
                     <td className="sch-mono sch-foot-end">
-                      {r2(stats.monthSum.reduce((a, b) => a + b, 0))}人月
-                      <span className="sch-foot-h">{fmtHours(ratioToHours(stats.monthSum.reduce((a, b) => a + b, 0), hpm))}</span>
+                      {fmtHours(ratioToHours(stats.monthSum.reduce((a, b) => a + b, 0), hpm))}
                     </td>
                   </tr>
                 </tfoot>
@@ -564,7 +568,7 @@ export default function ScheduleView() {
                       months={months}
                       open={openPal === p.id}
                       onToggle={togglePal}
-                      assigned={assignedMM.get(p.id)}
+                      assigned={assignedHours.get(p.id)}
                       statusMap={statusMap}
                     />
                   ))}

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, defaultManMonths, fiscalMonths, fiscalYearOf, flattenTree, manMonthFulfilment, projectMonthCount, roundManMonths, type Member } from "@shared/types";
+import {
+  addMonths, avgHoursPerMonth, defaultRequiredHours, fiscalMonths, fiscalYearOf, flattenTree, legacyManMonthsToHours, projectMonthCount,
+  requiredFulfilment, roundRequiredHours, type Member,
+} from "@shared/types";
 
 describe("addMonths", () => {
   it("adds and subtracts across year boundaries", () => {
@@ -94,42 +97,62 @@ describe("normalizeDB migrations", () => {
   });
 });
 
-describe("required man-months", () => {
-  it("defaults to count × project months, or 1 when the period is unusable", () => {
+describe("required hours per month", () => {
+  it("counts project months and defaults to count × hoursPerMonth", () => {
     expect(projectMonthCount({ startMonth: "2026-04", endMonth: "2026-09" })).toBe(6);
     expect(projectMonthCount({ startMonth: "2026-10", endMonth: "2027-03" })).toBe(6);
     expect(projectMonthCount({ startMonth: "2026-09", endMonth: "2026-04" })).toBeNull();
     expect(projectMonthCount({})).toBeNull();
-    expect(defaultManMonths(3, { startMonth: "2026-04", endMonth: "2026-09" })).toBe(18);
-    expect(defaultManMonths(2, { startMonth: "bad", endMonth: "2026-09" })).toBe(1);
+    expect(defaultRequiredHours(1, 160)).toBe(160);
+    expect(defaultRequiredHours(3, 160)).toBe(480);
+    expect(defaultRequiredHours(0, 150)).toBe(150);
   });
 
-  it("rounds to 2 decimals with a 0.01 floor", () => {
-    expect(roundManMonths(1 / 3)).toBe(0.33);
-    expect(roundManMonths(2.005 + 1e-9)).toBe(2.01);
-    expect(roundManMonths(0)).toBe(0.01);
+  it("rounds to integers with a floor of 1h", () => {
+    expect(roundRequiredHours(79.6)).toBe(80);
+    expect(roundRequiredHours(0.2)).toBe(1);
+    expect(roundRequiredHours(Number.NaN)).toBe(1);
+  });
+
+  it("converts legacy man-months over the project period to h/月", () => {
+    const p = { startMonth: "2026-04", endMonth: "2026-09" }; // 6ヶ月
+    expect(legacyManMonthsToHours(3, p, 160)).toBe(80);
+    expect(legacyManMonthsToHours(15, p, 160)).toBe(400);
+    expect(legacyManMonthsToHours(0.01, p, 160)).toBe(1);
+    expect(legacyManMonthsToHours(2, { startMonth: "bad" }, 160)).toBe(320);
+    expect(avgHoursPerMonth(3, p, 160)).toBe(80);
   });
 
   it("computes fulfilment as Σ min(assigned, required) / Σ required, capped per role", () => {
-    const p = { required: [{ statusId: "a", count: 1, manMonths: 2 }, { statusId: "b", count: 1, manMonths: 2 }] };
-    expect(manMonthFulfilment(p, new Map([["a", 1], ["b", 1]]))).toEqual({ need: 4, got: 2, ratio: 0.5 });
+    const p = { required: [{ statusId: "a", count: 1, hoursPerMonth: 160 }, { statusId: "b", count: 1, hoursPerMonth: 160 }] };
+    expect(requiredFulfilment(p, new Map([["a", 80], ["b", 80]]))).toEqual({ need: 320, got: 160, ratio: 0.5 });
     // a の超過で b の不足を打ち消さない
-    expect(manMonthFulfilment(p, new Map([["a", 5]]))!.ratio).toBe(0.5);
-    expect(manMonthFulfilment(p, new Map([["a", 3], ["b", 2]]))!.ratio).toBe(1);
-    expect(manMonthFulfilment({ required: [] }, new Map())).toBeNull();
+    expect(requiredFulfilment(p, new Map([["a", 400]]))!.ratio).toBe(0.5);
+    expect(requiredFulfilment(p, new Map([["a", 240], ["b", 160]]))!.ratio).toBe(1);
+    expect(requiredFulfilment({ required: [] }, new Map())).toBeNull();
   });
 
-  it("normalizeDB fills manMonths for legacy required roles", async () => {
+  it("normalizeDB migrates legacy manMonths and fills missing hoursPerMonth", async () => {
     const { normalizeDB } = await import("../server/storage");
+    const proj = (id: string, startMonth: string, endMonth: string, required: unknown[]) =>
+      ({ id, code: id, name: id, amount: 0, startMonth, endMonth, color: "#000", required });
     const db = normalizeDB({
+      settings: { hoursPerMonth: 160 },
       projects: [
-        { id: "p1", code: "A", name: "a", amount: 0, startMonth: "2026-04", endMonth: "2026-06", color: "#000", required: [{ statusId: "st_pm", count: 2 }] },
-        { id: "p2", code: "B", name: "b", amount: 0, startMonth: "", endMonth: "", color: "#000", required: [{ statusId: "st_pm", count: 2 }] },
-        { id: "p3", code: "C", name: "c", amount: 0, startMonth: "2026-04", endMonth: "2026-06", color: "#000", required: [{ statusId: "st_pm", count: 1, manMonths: 2.456 }] },
+        proj("p1", "2026-04", "2026-06", [{ statusId: "st_pm", count: 2 }]),
+        proj("p2", "", "", [{ statusId: "st_pm", count: 1, manMonths: 2 }]),
+        proj("p3", "2026-04", "2026-06", [{ statusId: "st_pm", count: 1, manMonths: 2.456 }]),
+        proj("p4", "2026-04", "2026-06", [{ statusId: "st_pm", count: 1, manMonths: 0.001 }]),
+        proj("p5", "2026-04", "2026-06", [{ statusId: "st_pm", count: 1, hoursPerMonth: 79.6, manMonths: 9 }]),
       ],
     })!;
-    expect(db.projects[0].required).toEqual([{ statusId: "st_pm", count: 2, manMonths: 6 }]);
-    expect(db.projects[1].required).toEqual([{ statusId: "st_pm", count: 2, manMonths: 1 }]);
-    expect(db.projects[2].required).toEqual([{ statusId: "st_pm", count: 1, manMonths: 2.46 }]);
+    expect(db.projects[0].required).toEqual([{ statusId: "st_pm", count: 2, hoursPerMonth: 320 }]);
+    expect(db.projects[1].required).toEqual([{ statusId: "st_pm", count: 1, hoursPerMonth: 320 }]);
+    expect(db.projects[2].required).toEqual([{ statusId: "st_pm", count: 1, hoursPerMonth: 131 }]);
+    expect(db.projects[3].required).toEqual([{ statusId: "st_pm", count: 1, hoursPerMonth: 1 }]);
+    expect(db.projects[4].required).toEqual([{ statusId: "st_pm", count: 1, hoursPerMonth: 80 }]);
+    // 1人月の時間が違えばその値で換算する
+    const db2 = normalizeDB({ settings: { hoursPerMonth: 150 }, projects: [proj("p1", "2026-04", "2026-06", [{ statusId: "st_pm", count: 1, manMonths: 3 }])] })!;
+    expect(db2.projects[0].required[0].hoursPerMonth).toBe(150);
   });
 });

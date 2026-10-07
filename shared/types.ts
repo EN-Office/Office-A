@@ -35,10 +35,10 @@ export interface RequiredRole {
   statusId: ID;
   count: number;
   /**
-   * この役割の必要工数（人月）。案件期間全体の合計。0.01 以上、小数 2 桁。
-   * 旧データにない場合は count × 案件の月数（計算できなければ 1）で補う
+   * この役割の必要工数（時間 / 月）。案件期間の 1 ヶ月あたり。1 以上の整数（hoursPerMonth = 1 名フルタイム）。
+   * 旧データの manMonths（案件全期間の人月）は読込時に round(manMonths × hoursPerMonth ÷ 案件の月数) へ移行する
    */
-  manMonths: number;
+  hoursPerMonth: number;
 }
 
 export interface Project {
@@ -108,15 +108,6 @@ export function hoursToRatio(hours: number, hpm: number): number {
   return hours / hpm;
 }
 
-/** 必要人月の最小値 */
-export const MIN_MAN_MONTHS = 0.01;
-
-/** 必要人月を小数 2 桁に丸め、0.01 以上にする */
-export function roundManMonths(n: number): number {
-  const v = Math.round(n * 100) / 100;
-  return v >= MIN_MAN_MONTHS ? v : MIN_MAN_MONTHS;
-}
-
 /** 案件期間の月数（開始・終了を含む）。期間が読めない・逆転しているときは null */
 export function projectMonthCount(p: { startMonth?: unknown; endMonth?: unknown }): number | null {
   const re = /^\d{4}-\d{2}$/;
@@ -127,24 +118,44 @@ export function projectMonthCount(p: { startMonth?: unknown; endMonth?: unknown 
   return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
-/** 必要人月の既定値: 人数 × 案件の月数（月数が計算できなければ 1） */
-export function defaultManMonths(count: number, p: { startMonth?: unknown; endMonth?: unknown }): number {
-  const n = projectMonthCount(p);
+/** 必要工数（h/月）の最小値 */
+export const MIN_REQUIRED_HOURS = 1;
+
+/** 必要工数（h/月）を整数に丸め、1 以上にする */
+export function roundRequiredHours(n: number): number {
+  const v = Math.round(n);
+  return Number.isFinite(v) && v >= MIN_REQUIRED_HOURS ? v : MIN_REQUIRED_HOURS;
+}
+
+/** 必要工数（h/月）の既定値: 人数 × 1人月時間（1名 = フルタイム） */
+export function defaultRequiredHours(count: number, hpm: number): number {
   const c = Number.isFinite(count) && count > 0 ? count : 1;
-  return n === null ? 1 : roundManMonths(c * n);
+  return roundRequiredHours(c * hpm);
+}
+
+/** 旧形式の必要人月（案件全期間の合計）→ 必要工数（h/月）: round(人月 × 1人月時間 ÷ 案件の月数)、最小 1 */
+export function legacyManMonthsToHours(mm: number, p: { startMonth?: unknown; endMonth?: unknown }, hpm: number): number {
+  const n = projectMonthCount(p) ?? 1;
+  return roundRequiredHours((mm * hpm) / n);
+}
+
+/** 案件全期間の Σratio → 月平均のアサイン時間（Σratio × 1人月時間 ÷ 案件の月数） */
+export function avgHoursPerMonth(ratioSum: number, p: { startMonth?: unknown; endMonth?: unknown }, hpm: number): number {
+  const n = projectMonthCount(p) ?? 1;
+  return (ratioSum * hpm) / n;
 }
 
 /**
- * 案件の人月充足率 = Σ min(アサイン人月, 必要人月) / Σ 必要人月（役割ごとに上限を付けるので 100% 以下。
- * ある役割の超過で別の役割の不足を打ち消さない）。assigned は statusId → 案件全期間の Σratio。
+ * 案件の工数充足率 = Σ min(アサイン平均 h/月, 必要 h/月) / Σ 必要 h/月（役割ごとに上限を付けるので 100% 以下。
+ * ある役割の超過で別の役割の不足を打ち消さない）。assigned は statusId → 案件期間の月平均アサイン時間。
  * 必要役割がなければ null
  */
-export function manMonthFulfilment(p: Pick<Project, "required">, assigned: Map<ID | "", number>): { need: number; got: number; ratio: number } | null {
+export function requiredFulfilment(p: Pick<Project, "required">, assigned: Map<ID | "", number>): { need: number; got: number; ratio: number } | null {
   let need = 0;
   let got = 0;
   for (const r of p.required) {
-    need += r.manMonths;
-    got += Math.min(r.manMonths, assigned.get(r.statusId) ?? 0);
+    need += r.hoursPerMonth;
+    got += Math.min(r.hoursPerMonth, assigned.get(r.statusId) ?? 0);
   }
   if (!p.required.length || need <= 0) return null;
   return { need, got, ratio: Math.min(1, got / need) };

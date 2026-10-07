@@ -143,7 +143,7 @@
 .pj-req__head { display: flex; justify-content: space-between; align-items: baseline; }
 .pj-req__list { border-top: 1px solid var(--line); }
 .pj-req__item { overflow: hidden; border-bottom: 1px solid var(--line); }
-.pj-req__inner { display: flex; align-items: center; gap: 12px; padding: 8px 0 8px 2px; font-size: 14px; }
+.pj-req__inner { display: flex; align-items: center; gap: 10px; padding: 8px 0 8px 2px; font-size: 14px; }
 .pj-req__add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 6px; }
 .pj-req__addbtn {
   display: inline-flex; align-items: center; gap: 4px;
@@ -158,10 +158,19 @@
 .pj-del { color: var(--danger); }
 .pj-autosave { text-align: right; }
 
-/* ---------- 必要人月 ---------- */
+/* ---------- 必要工数（h/月） ---------- */
 .pj-req__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj-req__lbl { font-size: 11px; color: var(--ink-3); letter-spacing: .04em; flex: none; }
-.pj-req__mmin { width: 116px; flex: none; }
+.pj-req__mmin { width: 108px; flex: none; }
+.pj-req__quick { display: inline-flex; gap: 4px; flex: none; }
+.pj-req__qbtn {
+  height: 26px; min-width: 36px; padding: 0 6px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-s);
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2);
+  transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.pj-req__qbtn:hover { border-color: var(--ink); color: var(--ink); }
+.pj-req__qbtn.is-on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .pj-req__mmin .ui-input { min-width: 0; }
 .pj-req__fill { display: block; padding: 0 0 10px 22px; }
 .pj-mm { display: flex; align-items: center; gap: 10px; }

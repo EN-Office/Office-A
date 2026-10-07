@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { compareMonth, isWithin, parseMonth, type ID, type MonthKey, type Project, type RoleStatus } from "@shared/types";
 import {
-  contractTotal, defaultManMonths, fmtMM, formatJPY, manMonthFulfilment, MIN_MAN_MONTHS, roundManMonths, selectFiscalMonths,
-  selectProjectFulfilment, selectProjectManMonths, useStore,
+  avgHoursPerMonth, contractTotal, defaultRequiredHours, formatJPY, hoursPerMonthOf, MIN_REQUIRED_HOURS, requiredFulfilment,
+  roundRequiredHours, selectFiscalMonths, selectProjectAssignedHours, selectProjectFulfilment, useStore,
 } from "@/lib/store";
+import { currentMonthKey, fmtHours } from "@/components/schedule/helpers";
 import {
   Button, Chip, ColorSwatches, ConfirmPopover, Drawer, Icon, IconButton, MonthInput, NumberInput, PALETTE, Stepper, TextInput,
 } from "@/components/ui";
@@ -27,7 +28,7 @@ export default function ProjectsView() {
 
   const months = useMemo(() => selectFiscalMonths(db, fy), [db, fy]);
   const fulfil = useMemo(() => selectProjectFulfilment(db, months), [db, months]);
-  const assignedMM = useMemo(() => selectProjectManMonths(db), [db]);
+  const assignedHours = useMemo(() => selectProjectAssignedHours(db), [db]);
   const statusMap = useMemo(() => new Map(db.roleStatuses.map((s) => [s.id, s])), [db.roleStatuses]);
   const memberCount = useMemo(() => {
     const set = new Set(months);
@@ -75,12 +76,13 @@ export default function ProjectsView() {
     let code = `P-${String(n).padStart(3, "0")}`;
     const codes = new Set(db.projects.map((p) => p.code));
     for (let i = n; codes.has(code); i++) code = `P-${String(i + 1).padStart(3, "0")}`;
+    const now = currentMonthKey();
     const p = addProject({
       code,
       name: "新規案件",
       amount: 0,
-      startMonth: months[0],
-      endMonth: months[11],
+      startMonth: now,
+      endMonth: now,
       required: [],
       color: PALETTE[db.projects.length % PALETTE.length],
       note: "",
@@ -154,7 +156,7 @@ export default function ProjectsView() {
                   months={months}
                   statusMap={statusMap}
                   fulfil={fulfil.get(p.id)}
-                  assignedMM={assignedMM.get(p.id) ?? EMPTY_MM}
+                  assigned={assignedHours.get(p.id) ?? EMPTY_MM}
                   members={memberCount.get(p.id)?.size ?? 0}
                   onOpen={() => setOpenId(p.id)}
                 />
@@ -173,30 +175,30 @@ export default function ProjectsView() {
 
 const EMPTY_MM = new Map<ID | "", number>();
 
-/** 必要人月に対するアサイン人月のメーター（不足は赤） */
-function MMMeter({ got, need }: { got: number; need: number }) {
+/** 必要工数（h/月）に対するアサイン平均（h/月）のメーター（不足は赤） */
+function HoursMeter({ got, need }: { got: number; need: number }) {
   const short = got + 1e-9 < need;
   return (
-    <span className={`pj-mm ${short ? "is-short" : "is-met"}`} title={short ? `${fmtMM(need - got)}人月 不足` : "充足"}>
+    <span className={`pj-mm ${short ? "is-short" : "is-met"}`} title={short ? `${fmtHours(need - got)}/月 不足` : "充足"}>
       <span className="pj-mm__bar"><i style={{ width: `${need > 0 ? Math.min(1, got / need) * 100 : 100}%` }} /></span>
-      <span className="pj-mm__txt num">{fmtMM(got)} / {fmtMM(need)}人月</span>
+      <span className="pj-mm__txt num">{fmtHours(got)} / {fmtHours(need)}/月</span>
     </span>
   );
 }
 
-function ProjectCard({ project: p, months, statusMap, fulfil: f, assignedMM, members, onOpen, index }: {
+function ProjectCard({ project: p, months, statusMap, fulfil: f, assigned, members, onOpen, index }: {
   project: Project;
   months: MonthKey[];
   statusMap: Map<ID, RoleStatus>;
   fulfil?: Map<ID | "", number>;
-  /** statusId → 案件全期間のアサイン人月 */
-  assignedMM: Map<ID | "", number>;
+  /** statusId → 案件期間の月平均アサイン時間（h/月） */
+  assigned: Map<ID | "", number>;
   members: number;
   onOpen: () => void;
   index: number;
 }) {
-  // リングは人月充足率（Σ min(アサイン人月, 必要人月) / Σ 必要人月）
-  const mmf = manMonthFulfilment(p, assignedMM);
+  // リングは工数充足率（Σ min(アサイン平均 h/月, 必要 h/月) / Σ 必要 h/月）
+  const mmf = requiredFulfilment(p, assigned);
   const need = mmf?.need ?? 0;
   const got = mmf?.got ?? 0;
   const ratio = mmf?.ratio ?? 0;
@@ -254,22 +256,22 @@ function ProjectCard({ project: p, months, statusMap, fulfil: f, assignedMM, mem
             const st = statusMap.get(r.statusId);
             if (!st) return null;
             const have = f?.get(r.statusId) ?? 0;
-            const mm = assignedMM.get(r.statusId) ?? 0;
-            const met = have >= r.count && mm + 1e-9 >= r.manMonths;
+            const h = assigned.get(r.statusId) ?? 0;
+            const met = have >= r.count && h + 1e-9 >= r.hoursPerMonth;
             return (
               <Chip
                 key={r.statusId}
                 color={st.color}
-                count={`${have}/${r.count} · ${fmtMM(r.manMonths)}人月`}
+                count={`${have}/${r.count} · ${fmtHours(r.hoursPerMonth)}/月`}
                 className={met ? "is-met" : ""}
-                title={`${st.name}: アサイン ${have}/${r.count} 名 · ${fmtMM(mm)} / ${fmtMM(r.manMonths)}人月`}
+                title={`${st.name}: アサイン ${have}/${r.count} 名 · 平均 ${fmtHours(h)} / 必要 ${fmtHours(r.hoursPerMonth)}/月`}
               >
                 {st.name}
               </Chip>
             );
           })}
         </div>
-        <div className={`pj-fill pj-fill--${state}`} title={mmf ? `人月充足 ${fmtMM(got)} / ${fmtMM(need)}人月` : `アサイン ${members}名`}>
+        <div className={`pj-fill pj-fill--${state}`} title={mmf ? `工数充足 ${fmtHours(got)} / ${fmtHours(need)}/月` : `アサイン ${members}名`}>
           <svg viewBox="0 0 36 36" className="pj-fill__ring" aria-hidden>
             <circle cx="18" cy="18" r="15" className="pj-fill__track" />
             <motion.circle
@@ -281,7 +283,7 @@ function ProjectCard({ project: p, months, statusMap, fulfil: f, assignedMM, mem
             />
           </svg>
           <span className="pj-fill__txt num">{mmf ? `${Math.floor(ratio * 100)}` : members}</span>
-          <span className="pj-fill__lbl">{mmf ? "人月%" : "名"}</span>
+          <span className="pj-fill__lbl">{mmf ? "工数%" : "名"}</span>
         </div>
       </div>
     </motion.article>
@@ -297,15 +299,16 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
   const sortedStatuses = useMemo(() => [...statuses].sort((a, b) => a.order - b.order), [statuses]);
   const statusMap = useMemo(() => new Map(statuses.map((s) => [s.id, s])), [statuses]);
   const assignments = useStore((s) => s.db.assignments);
+  const hpm = useStore((s) => hoursPerMonthOf(s.db));
 
   const p = project;
-  // 役割ごとのアサイン人月（案件の全期間）
-  const assignedMM = useMemo(() => {
+  // 役割ごとの月平均アサイン時間（案件の全期間の Σ時間 ÷ 案件の月数）
+  const assignedHours = useMemo(() => {
     const m = new Map<ID | "", number>();
     if (!p) return m;
     for (const a of assignments) if (a.projectId === p.id) m.set(a.statusId ?? "", (m.get(a.statusId ?? "") ?? 0) + a.ratio);
-    return m;
-  }, [assignments, p]);
+    return new Map([...m].map(([k, v]) => [k, avgHoursPerMonth(v, p, hpm)]));
+  }, [assignments, p, hpm]);
   const up = (patch: Partial<Omit<Project, "id">>) => p && updateProject(p.id, patch);
   const invalidRange = p ? compareMonth(p.endMonth, p.startMonth) < 0 : false;
   const durationMonths = p ? (() => {
@@ -316,11 +319,12 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
   const setCount = (statusId: ID, count: number) =>
     p && up({ required: p.required.map((r) => (r.statusId === statusId ? { ...r, count } : r)) });
   const removeReq = (statusId: ID) => p && up({ required: p.required.filter((r) => r.statusId !== statusId) });
-  const setManMonths = (statusId: ID, manMonths: number) =>
-    p && up({ required: p.required.map((r) => (r.statusId === statusId ? { ...r, manMonths: roundManMonths(manMonths) } : r)) });
-  const addReq = (statusId: ID) => p && up({ required: [...p.required, { statusId, count: 1, manMonths: defaultManMonths(1, p) }] });
-  const totalMM = p ? p.required.reduce((s, r) => s + r.manMonths, 0) : 0;
-  const totalGot = p ? p.required.reduce((s, r) => s + (assignedMM.get(r.statusId) ?? 0), 0) : 0;
+  const setReqHours = (statusId: ID, hours: number) =>
+    p && up({ required: p.required.map((r) => (r.statusId === statusId ? { ...r, hoursPerMonth: roundRequiredHours(hours) } : r)) });
+  const addReq = (statusId: ID) => p && up({ required: [...p.required, { statusId, count: 1, hoursPerMonth: defaultRequiredHours(1, hpm) }] });
+  const totalNeed = p ? p.required.reduce((s, r) => s + r.hoursPerMonth, 0) : 0;
+  const totalGot = p ? p.required.reduce((s, r) => s + (assignedHours.get(r.statusId) ?? 0), 0) : 0;
+  const quickHours = [hpm / 2, hpm].map((h) => Math.round(h));
 
   const available = p ? sortedStatuses.filter((s) => !p.required.some((r) => r.statusId === s.id)) : [];
 
@@ -384,7 +388,7 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
             <div className="pj-req__head">
               <span className="eyebrow">必要役割</span>
               <span className="num muted small">
-                計 {p.required.reduce((s, r) => s + r.count, 0)} 名 · アサイン {fmtMM(totalGot)} / 必要 {fmtMM(totalMM)}人月
+                計 {p.required.reduce((s, r) => s + r.count, 0)} 名 · アサイン平均 {fmtHours(totalGot)} / 必要 {fmtHours(totalNeed)}/月
               </span>
             </div>
             <ul className="pj-req__list">
@@ -407,21 +411,34 @@ function ProjectDrawer({ project, onClose, months }: { project: Project | null; 
                         <span className="grow pj-req__name">{st.name}</span>
                         <span className="pj-req__lbl">人数</span>
                         <Stepper value={r.count} min={1} onChange={(c) => setCount(r.statusId, c)} label={`${st.name} 人数`} />
-                        <span className="pj-req__lbl">必要人月</span>
+                        <span className="pj-req__lbl">必要工数</span>
                         <NumberInput
                           className="pj-req__mmin"
-                          value={r.manMonths}
-                          min={MIN_MAN_MONTHS}
-                          step={0.01}
-                          decimals={2}
-                          suffix="人月"
-                          onChange={(v) => setManMonths(r.statusId, v)}
-                          aria-label={`${st.name} 必要人月`}
+                          value={r.hoursPerMonth}
+                          min={MIN_REQUIRED_HOURS}
+                          step={1}
+                          decimals={0}
+                          suffix="h/月"
+                          onChange={(v) => setReqHours(r.statusId, v)}
+                          aria-label={`${st.name} 必要工数`}
                         />
+                        <span className="pj-req__quick" role="group" aria-label={`${st.name} 必要工数のクイック入力`}>
+                          {quickHours.map((h) => (
+                            <button
+                              key={h}
+                              type="button"
+                              className={`pj-req__qbtn num ${r.hoursPerMonth === h ? "is-on" : ""}`}
+                              aria-pressed={r.hoursPerMonth === h}
+                              onClick={() => setReqHours(r.statusId, h)}
+                            >
+                              {h}
+                            </button>
+                          ))}
+                        </span>
                         <IconButton icon="close" label={`${st.name} を外す`} size="sm" variant="danger" onClick={() => removeReq(r.statusId)} />
                       </span>
                       <span className="pj-req__fill">
-                        <MMMeter got={assignedMM.get(r.statusId) ?? 0} need={r.manMonths} />
+                        <HoursMeter got={assignedHours.get(r.statusId) ?? 0} need={r.hoursPerMonth} />
                       </span>
                     </motion.li>
                   );

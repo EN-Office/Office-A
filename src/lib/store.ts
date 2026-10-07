@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import type { Assignment, DB, ID, Member, MonthKey, Project, Role, RoleStatus, Settings } from "@shared/types";
 import { emptyDB, uid } from "@shared/types";
-import { fiscalMonths, fiscalYearOf, hoursRange } from "@shared/types";
+import { avgHoursPerMonth, fiscalMonths, fiscalYearOf, hoursPerMonthOf, hoursRange } from "@shared/types";
 import { fetchDB, saveDB } from "./api";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -321,24 +321,25 @@ export function selectProjectFulfilment(db: DB, months: MonthKey[]): Map<ID, Map
 }
 
 /**
- * 案件ごと・役割ステータスごとのアサイン済み人月（案件の全期間・全月の Σratio。年度で絞らない）。
- * 必要人月（RequiredRole.manMonths）との比較に使う
+ * 案件ごと・役割ステータスごとの月平均アサイン時間（h/月）。
+ * 案件の全期間・全月の Σratio × 1人月時間 ÷ 案件の月数（年度で絞らない）。必要工数（RequiredRole.hoursPerMonth）との比較に使う
  */
-export function selectProjectManMonths(db: DB): Map<ID, Map<ID | "", number>> {
-  const out = new Map<ID, Map<ID | "", number>>();
+export function selectProjectAssignedHours(db: DB): Map<ID, Map<ID | "", number>> {
+  const hpm = hoursPerMonthOf(db);
+  const sums = new Map<ID, Map<ID | "", number>>();
   for (const a of db.assignments) {
-    const byStatus = out.get(a.projectId) ?? new Map<ID | "", number>();
+    const byStatus = sums.get(a.projectId) ?? new Map<ID | "", number>();
     const k = a.statusId ?? "";
     byStatus.set(k, (byStatus.get(k) ?? 0) + (Number.isFinite(a.ratio) ? a.ratio : 1));
-    out.set(a.projectId, byStatus);
+    sums.set(a.projectId, byStatus);
+  }
+  const out = new Map<ID, Map<ID | "", number>>();
+  for (const p of db.projects) {
+    const byStatus = sums.get(p.id);
+    if (byStatus) out.set(p.id, new Map([...byStatus].map(([k, v]) => [k, avgHoursPerMonth(v, p, hpm)])));
   }
   return out;
 }
 
-export { defaultManMonths, manMonthFulfilment, roundManMonths, MIN_MAN_MONTHS } from "@shared/types";
+export { avgHoursPerMonth, defaultRequiredHours, requiredFulfilment, roundRequiredHours, MIN_REQUIRED_HOURS } from "@shared/types";
 
-const mmFmt = new Intl.NumberFormat("ja-JP", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-/** 人月の表示（小数 1〜2 桁）: 2.0 / 2.5 / 0.33 / 12.0 */
-export function fmtMM(n: number): string {
-  return mmFmt.format(Math.round(n * 100) / 100);
-}
